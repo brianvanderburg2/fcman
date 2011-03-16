@@ -1,0 +1,63 @@
+0.20
+----
+* Between versions 0.8 and 0.20 were some Python command line releases for
+  experimenting with some additional ideas, some of which will be added to
+  the program.
+* Added real mode support which allows moving and renaming contents in the
+  collection to move and rename them in the real filesystem.
+
+0.8
+---
+* Added ability for new/modified items to be marked dirty, so they can be later
+  checked for any package and dependency changes and manually set to clean.
+
+0.7
+---
+* Minor bug fix saving/loading file sizes, but only sizes up to ~4GB are supported
+
+0.6
+---
+* Now maximize at startup
+* Open a file from the command line
+* No longer reload entire file when scanning for new or removing missing items
+* Deleting a directory item selects previous item if possible else the parent item
+* No prompt if no rename candidates
+* Now moving and deleting multiple files is supported
+* Track sizes of files and report if sizes are different during sanity check
+* During checksum calculation, update file size as well
+* During checksum calculation, if file sizes are different, they are considered
+  new and so can be updated by doing a Calculate New Checksums
+* Rename dialog show complete name of the new name as well
+* Edit panel look changes
+* Files can now have a description
+* Calculate and verify checksum can be performed from the file list
+
+0.5
+---
+* Simplified some code
+* Single Verify Sanity takes place of scan for missing, extra, duplicate, dependencies
+  It checks basically everything except checksums
+* Rename can now support multiple candidates
+
+0.4
+---
+* Fixed version comparison bug
+* Removed unused menu items
+* Speed up calculating checksums a little by using a single memory buffer for
+  all files instead of creating and destroying one for each file
+
+0.3
+---
+* Convert from Python to C++
+* Results displayed while working
+* Edit panel controls disabled if a package or dependency is not selected
+
+0.2
+---
+* Bug fix when verifying checksums
+* Window position now remembered between runs
+
+0.1
+---
+* User interface mostly implemented
+* Collection file code implemented

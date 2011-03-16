@@ -1,0 +1,36 @@
+# vim: set filetype=python:'
+
+# This file is part of File Collection Manager
+# Copyright (C) 2009 Brian Allen Vanderburg II
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+
+
+# Requirements
+Import('*')
+
+
+# Install binaries
+binaries = []
+
+binaries += defenv.InstallPackage('$DESTDIR$PREFIX/bin', 'bin')
+
+# Install data
+data = []
+
+data += defenv.InstallPackage('$DESTDIR$PREFIX/share/fcman', 'data')
+data += defenv.InstallPackage('$DESTDIR$PREFIX/share/doc/fcman', 'doc')
+
+icon = defenv.SubstFile('fcman.desktop', 'desktop.in')
+data += defenv.Install('$DESTDIR$PREFIX/share/applications', icon)
+
+# Set permissions
+AddPostAction(binaries, Chmod('$TARGET', 0755))
+AddPostAction(data, Chmod('$TARGET', 0644))
+
+# Make alias
+Alias('install', binaries + data)
+
