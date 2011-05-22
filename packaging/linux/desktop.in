@@ -1,9 +1,0 @@
-[Desktop Entry]
-Encoding=UTF-8
-Name=@APP_DISPLAY_NAME@
-Type=Application
-Comment=@APP_DESCRIPTION@
-TryExec=@PREFIX@/bin/fcman
-Exec=@PREFIX@/bin/fcman
-Categories=Utility;
-Icon=@PREFIX@/share/fcman/pixmaps/mainicon48.xpm

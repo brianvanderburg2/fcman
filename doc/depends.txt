@@ -1,7 +1,0 @@
-Dependencies
-------------
-
-SCons >= 1.2.0
-wxWidgets >= 2.8.10
-libmhash
-
