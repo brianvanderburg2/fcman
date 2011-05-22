@@ -82,3 +82,76 @@ Keywords
 Hint
     Each file/directory can have a hint that will appear in the browser
     interface along with the icon and filename.
+
+Plugins
+    The browser simply provides a container to work with.  Much of the actual
+    functions would be implemented as plugins.  Plugins can hook into various
+    routines to do their work.
+
+    ContextMenuCreate hook.  When a user right-clicks on an item, the menu
+    is built and the plugin context hook is called taking the item(s) selected.
+    The plugin can insert the menu items desired.  If the user clicks on
+    an item, the corresponding plugin will be called with the item id and
+    item(s) selected.  At startup, the plugin would need to create all
+    the ids used (wxNewId) so it would not regenerate each time.
+
+    ContextMenuSelected hook.  
+
+    PropertySheetCreate hook.
+
+    QuickChecksStartHook
+    QuickChecksItemHook
+    QuickChecksEndHook
+
+    PluginManager::Blah
+        Call Blah on each plugin.  The plugin will have to decide whether
+        it should act or not.  For example, if a menu item is selected
+        that is not a standard item, then the plugin manager will pass
+        the call to the ContextMenuSelected of each plugin.  Only the
+        plugin with the menu id should actually act.
+
+    Init (each plugin can initialize at startup)
+    Load (called when opening a collection, Fets document root and file.
+          can read information from document root and set file properties)
+    Save (called when saving a collection.  Gets document root and file.
+          can write information to document root from file properties.)
+    Close (called when closing a collection)
+    LoadItem (Called when loading an item during open.  Gets xml node and
+          item node.  Can read xml and set item properties)
+    SaveItem (Called when saving an item during save.  Gets xml node and
+          item node.  Can write xml from item properties).
+
+Arrangement:
+
+    gui/
+        __init__.py (contain some util functions like NewId)
+        plugins/
+            blah.py (contains gui components for blah plugin.  property sheet, etc)
+    file/
+        plugins/
+            __init__.py (contains manager)
+            blah.py
+        collection/
+            ...
+        history/
+            ...
+        etc
+
+    For multiple GUI toolkits, could have the gui as:
+
+    gui/
+        __init__.py (will select correct toolkit and import all names into gui)
+            if gui == 'wx':
+                from wxwidgets import *
+
+        wxwidgets/
+        gtk/
+        qt/
+
+    Then the base platform dependent parts of the plugins could just use gui:
+
+    plugin create property sheet could just do:
+        new gui.plugins.myplugin.propertysheet(...)
+
+
+
