@@ -1,0 +1,37 @@
+#!/usr/bin/env python
+# vim: set filetype=python:
+#
+# File:     fcman (or fcman.py)
+# Desc:     This is the launcher for the application
+
+
+import sys
+import os
+
+sys.dont_write_bytecode = True
+
+# Find the prefix or project root directory
+prefix = os.path.abspath(os.path.dirname(__file__))
+(prefix, tail) = os.path.split(prefix)
+while tail and tail != 'bin':
+    (prefix, tail) = os.path.split(prefix)
+
+if not prefix:
+    print("ERROR: Program prefix not found.")
+    sys.exit(-1)
+
+# Prepare system path
+libpath = os.path.join(prefix, 'lib', 'fcman')
+
+if sys.path[0] == '.' or os.path.abspath(sys.path[0]) == os.path.abspath(os.path.dirname(__file__)):
+    del sys.path[0]
+
+sys.path.insert(0, libpath)
+
+# Import and run the application
+from fcman import paths
+paths.init(prefix)
+
+from fcman import app
+sys.exit(app.run())
+

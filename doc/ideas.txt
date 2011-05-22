@@ -1,0 +1,84 @@
+File Collection Manager 2 Ideas
+===============================
+
+
+* Use a browser-like interface.
+
+The program should use an interface that is much like a file browser. An
+address bar/breadcrumbs bar can be used for navigation.  The view area
+shows the items in the current view, both those in the collection and
+those that are not.  A sidebar show multiple panes for various features
+such as directory tree (both the collection and the real file system),
+notes, update checks, dependencies, etc.
+
+Each node in the file would have two functions:  Exists and InFile.
+Exists is used to determine if the file itself actually exists.  InFile
+is used to determine if the node is actually part of the collection to
+be saved.  When loading a given directory node, if it does exist the
+contents of the directory will be checked.  Any item that isn't currently
+in the collection gets added to the collection without the infile flag.
+
+Special overlay icons would exist to indicate various information about
+the file.  One overlay would be for missing item (red minus), another for
+new item (blue plus), another if the file seems to have changed (size or
+timestamp issue, yellow pencil)
+
+Each item has a popup menu that can be used to perform certain actions.
+A properties action would open a properties dialog for editing various
+pieces of information (the default double-click action).  This
+information exists for files as well as for directories.  Some may
+not exist for directories (such as checksum).
+
+Both:
+    Notes
+    Update checks
+    Packages/dependencies
+    Tags
+
+File only:
+    Size
+    Timestamp
+    Checksum
+
+Extra:
+    Last updated (the time the item was inserted/updated in the collection)
+
+
+Search is provided by searching various pieces of information in the tree
+of the collection.  A search processor would provide one type of data to
+search for.  One or more processors can be specified in a search along
+with the option for any or all to match for the search to be found.  The
+search may specify to search the entire collection or just the current
+directory and subdirectories, or if in a search already, the current
+search contents.
+
+
+Post-download scripts.
+    An information structure would get passed to a python script.  The
+    python script can then do what it needs, recompress, etc.  It could
+    move the old file to a temp directoryand keep the new file in place.
+
+Merge
+    Files can be merged into the collection by specifying a source
+    directory.  The directory is scanned for files and the program tries
+    to guess where the files should go and also if the files should replace
+    another file.  If the file should replace another file, the other file
+    may be preserved in a history if it is enabled.
+
+    Merge can also support directories if in the collection a directory is
+    set to be the merge marker.  Then an engire directory is replaced and
+    the old directory either kept as history or moved to a temp location.
+
+    By default, only files are set as merge markers.
+
+Tags
+    Each file/directory can have associated tags.  Predefined tag sets can
+    be created so that a set of tags can be created for a file/directory.
+    Tags have a name=value form.
+
+Keywords
+    Each file/directory can have keywords to facilitate in searching.
+
+Hint
+    Each file/directory can have a hint that will appear in the browser
+    interface along with the icon and filename.
