@@ -1,6 +1,24 @@
-File Collection Manager 2 Ideas
-===============================
+File Collection Manager 1.0 Ideas
+=================================
 
+Coding:
+    wxPython, using wxAUI to give the user more control over laying out the window.
+
+Properties:
+    core.description
+    core.updated                Timestamp of when the file/dir was last updated
+                                An item is updated when it is added or replaced.
+                                Files are also updated if teh checksum is recalculated
+                                and different from the last checksum.
+    core.homepage               URL of the home page
+    core.download               URL of the download page
+    core.checksum               Calculated checksum in the form "type:value"
+    core.sigkey                 Trusted key fingerprint for the original files.
+                                Downloaded files may be recompressed from gz to xz,
+                                but this is the trusted key or keys for the original
+                                signed file (.gz.sig)
+    core.size                   Size of the file
+    
 
 * Use a browser-like interface.
 
@@ -11,12 +29,13 @@ those that are not.  A sidebar show multiple panes for various features
 such as directory tree (both the collection and the real file system),
 notes, update checks, dependencies, etc.
 
-Each node in the file would have two functions:  Exists and InFile.
-Exists is used to determine if the file itself actually exists.  InFile
-is used to determine if the node is actually part of the collection to
-be saved.  When loading a given directory node, if it does exist the
-contents of the directory will be checked.  Any item that isn't currently
-in the collection gets added to the collection without the infile flag.
+Each node in the file would have two functions:  Exists and IsTemp.
+Exists is used to determine if the file itself actually exists.  IsTemp
+is used to determine if the node is actually on the system but not part
+of the collection to be saved.  When loading a given directory node, if
+it does exist the contents of the directory will be checked.  Any item
+that isn't currently in the collection gets added to the collection
+with the temp flag.
 
 Special overlay icons would exist to indicate various information about
 the file.  One overlay would be for missing item (red minus), another for
@@ -154,4 +173,59 @@ Arrangement:
         new gui.plugins.myplugin.propertysheet(...)
 
 
+Collection Format:
 
+<?xml version="1.0" encoding="utf-8"?>
+<collection>
+    <contents>
+        <dir name="...">
+            <file name="...">
+            </file>
+        </dir>
+        <file name="...">
+            <comment>...</comment>
+            <property name="..." value="..." />
+            or
+            <property name="...">...</property> <!-- if no value attribute, use inner contents.</property>
+
+            <!-- Common properties:
+                module checksum:
+                    filesize
+                    checksum
+                    checksumtime (time checksum was updated)
+                dependencies
+                    package
+                    dependency
+
+                Internally each property name is put in a list.  For items that only
+                have one property, this means only one item.  If the same property is
+                present more than once, such as package or dependency, the the matching
+                list will have more than one item:
+
+                node.properties['package'][0]
+                node.properties['filesize'][0]
+
+                node.getProperty(name, index=0)
+                node.setProperty(name, value, index=0)
+                
+        </file>
+    </contents>
+</collection>
+
+
+Collection:
+    Collection classes
+    Node
+        getParent
+        getPath
+        getRealPath
+        exists()
+        isTemp()
+        setMode() // MODE_COLLECTION, MODE_FILESYSTEM or both
+        move(source, dest)
+        rename(source, name)
+        delete(source)
+        File
+        Directory
+            update() // rescan and add temporary nodes as needed
+            RootDirectory
