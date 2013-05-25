@@ -1,2 +1,2 @@
 run:
-	python -B -m fcman.main
+	cd lib && python -B -m fcman.main

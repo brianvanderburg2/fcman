@@ -14,7 +14,7 @@ class Node(object):
     """ A node represents either a file or directory in the collection. """
 
     def __init__(self, name, parent):
-        """ Initialize the name with the name, parent, and collection """
+        """ Initialize the collection with the name, parent, and collection """
         self._name = name
         self._parent = parent
         if not parent is None:

@@ -1,4 +1,4 @@
-from setuptools import setup
+from distutils.core import setup
 
 setup(
     name='fcman',
@@ -7,4 +7,6 @@ setup(
     author='Brian Allen Vanderburg II',
     author_email='brianvanderburg@users.sourceforge.net',
     packages=['fcman'],
+    package_dir={'': 'lib'},
+    package_data={'fcman': ['resources/*.png']}
 )
