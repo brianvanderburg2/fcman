@@ -8,8 +8,17 @@ import time
 from xml.dom import minidom
 import hashlib
 
+
+version = "20131102-3"
+
 # Utility functions and stuff
 ################################################################################
+
+def listdir(path):
+    # Make os.listdir return unicode names by passing it a unicode path
+    if isinstance(path, bytes):
+        path = path.decode(sys.getfilesystemencoding())
+    return os.listdir(path)
 
 _case_sensitive = ('abcDEF' == os.path.normcase('abcDEF'))
 def realname(path):
@@ -23,7 +32,7 @@ def realname(path):
     dir = os.path.dirname(path)
     name = os.path.basename(path)
 
-    return name in os.listdir(dir)
+    return name in listdir(dir)
 
 def checksum(path):
     """ Calculate the checksum and return the result. """
@@ -197,7 +206,7 @@ class File(Node):
             log.verbose(self.prettypath, 'CALCULATING')
             if self._checksum != checksum(self._path):
                 status = False
-                log.message(self.prettypath, 'CHECKSUM')
+                log.status(self.prettypath, 'CHECKSUM')
 
         return status
 
@@ -268,7 +277,7 @@ class Directory(Node):
                 status = False
 
         # Check for new items
-        for i in sorted(os.listdir(self._path)):
+        for i in sorted(listdir(self._path)):
             if not self.ignore(i) and not i in self._children:
                 log.status(self.prettypath + os.sep + i, 'NEW')
                 status = False
@@ -299,7 +308,7 @@ class Directory(Node):
                 log.status(item.prettypath, 'DELETED')
 
         # Add new items
-        for i in sorted(os.listdir(self._path)):
+        for i in sorted(listdir(self._path)):
             if not self.ignore(i) and not i in self._children:
                 path = self._path + os.sep + i
 
