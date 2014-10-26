@@ -3,13 +3,16 @@
 import sys
 import os
 
-import codecs
 import time
-from xml.dom import minidom
 import hashlib
 
+try:
+    from xml.etree import cElementTree as ET
+except ImportError:
+    from xml.etree import ElementTree as ET
 
-version = "20131102-3"
+
+version = "20131201-1"
 
 # Utility functions and stuff
 ################################################################################
@@ -48,6 +51,18 @@ def checksum(path):
 
 class Logger(object):
     """ Show logging information """
+    _signaled = False
+    @classmethod
+    def handler(cls, signum, frame):
+        Logger._signaled = True
+
+    @property
+    def verbose(self):
+        if Logger._signaled:
+            Logger._signaled = False
+            return True
+
+        return self._verbose
 
     def __init__(self, verbose):
         self._verbose = verbose
@@ -63,29 +78,43 @@ class Logger(object):
     def status(self, path, status):
         self.message(status + ': ' + path)
 
-    def verbose(self, msg, status):
-        if self._verbose:
-            self.status(msg, status)
-
+try:
+    import signal
+    signal.signal(signal.SIGUSR1, Logger.handler)
+except ImportError:
+    pass
 
 # Collection classes
 ################################################################################
+class State(object):
+    def __init__(self, path, prettypath=None):
+        self._path = path
+        self._prettypath = prettypath if prettypath else '.'
+
+    def clone(self, name):
+        return State(self._path + os.sep + name, self._prettypath + '/' + name)
+
+    @property
+    def path(self):
+        return self._path
+
+    @property
+    def prettypath(self):
+        return self._prettypath if self._prettypath else '.'
+        
+
+
 class Node(object):
     """ A node represents a file, symlink, or directory in the collection. """
 
     def __init__(self, parent, name):
         """ Initialize the collection with the name, parent, and collection """
-        self._parent = parent
         self._name = name
 
         if not parent is None:
-            self._collection = parent._collection
-            self._path = parent._path + os.sep + name
             parent._children[name] = self
         else:
             assert(isinstance(self, Collection))
-            self._collection = self
-            self._path = name
 
     # Load and save
     @staticmethod
@@ -96,67 +125,58 @@ class Node(object):
         raise NotImplementedError
 
     # Check and verify
-    def check(self, log, full=False):
+    def check(self, state, log, full=False):
         raise NotImplementedError
 
-    def update(self, log):
+    def update(self, state, log):
         raise NotImplementedError
     
-    def exists(self):
+    def exists(self, state):
         raise NotImplementedError
 
-    def dumpchecksum(self, log):
+    def dumpchecksum(self, state, log):
         raise NotImplementedError
-
-    @property
-    def prettypath(self):
-        return self._path[len(self._collection._path):]
-
 
 class Symlink(Node):
     """ A symbolic link node. """
-    # TODO: track the linked target
-
     def __init__(self, parent, name, target):
         Node.__init__(self, parent, name)
         self._target = target
 
     @staticmethod
     def load(parent, xml):
-        name = xml.getAttribute('name')
-        target = xml.getAttribute('target')
+        name = xml.get('name')
+        target = xml.get('target')
 
         return Symlink(parent, name, target)
 
     def save(self, xml):
-        doc = xml.ownerDocument
+        child = ET.SubElement(xml, 'symlink')
+        child.set('name', self._name)
+        child.set('target', self._target)
 
-        child = doc.createElement('symlink')
-        child.setAttribute('name', self._name)
-        child.setAttribute('target', self._target)
-
-        xml.appendChild(child)
         return child
 
-    def check(self, log, full=False):
-        target = os.readlink(self._path)
+    def check(self, state, log, full=False):
+        target = os.readlink(state.path)
         if target != self._target:
-            log.status(self.prettypath, 'SYMLINK')
+            log.status(state.prettypath, 'SYMLINK')
             return False
 
         return True
 
-    def update(self, log):
-        target = os.readlink(self._path)
+    def update(self, state, log):
+        target = os.readlink(state.path)
         if(target != self._target):
             self._target = target
-            log.status(self.prettypath, 'SYMLINK')
+            log.status(state.prettypath, 'SYMLINK')
 
-    def exists(self):
-        return os.path.islink(self._path) and realname(self._path)
+    def exists(self, state):
+        return os.path.islink(state.path) and realname(state.path)
 
-    def dumpchecksums(self, log):
-        pass
+    def dumpchecksum(self, state, log):
+        if log.verbose:
+            log.output('[Symbolic Link]' + ' ' * 17 + ' *' + state.prettypath[1:] + ' -> ' + self._target)
 
 class File(Node):
     """ A file node """
@@ -171,61 +191,62 @@ class File(Node):
 
     @staticmethod
     def load(parent, xml):
-        name = xml.getAttribute('name')
-        size = xml.getAttribute('size')
-        timestamp = xml.getAttribute('timestamp')
-        checksum = xml.getAttribute('checksum')
+        name = xml.get('name')
+        size = xml.get('size')
+        timestamp = xml.get('timestamp')
+        checksum = xml.get('checksum')
 
         return File(parent, name, int(size), int(timestamp), checksum)
 
     def save(self, xml):
-        doc = xml.ownerDocument
+        child = ET.SubElement(xml, 'file')
+        child.set('name', self._name)
+        child.set('size', str(self._size))
+        child.set('timestamp', str(self._timestamp))
+        child.set('checksum', self._checksum)
 
-        child = doc.createElement('file')
-        child.setAttribute('name', self._name)
-        child.setAttribute('size', str(self._size))
-        child.setAttribute('timestamp', str(self._timestamp))
-        child.setAttribute('checksum', self._checksum)
-
-        xml.appendChild(child)
         return child
 
-    def check(self, log, full=False):
+    def check(self, state, log, full=False):
         status = True
-        stat = os.stat(self._path)
+        stat = os.stat(state.path)
 
         if abs(self._timestamp - stat.st_mtime) > self.TIMEDIFF:
             status = False
-            log.status(self.prettypath, 'TIMESTAMP')
+            log.status(state.prettypath, 'TIMESTAMP')
 
         if self._size != stat.st_size:
             status = False
-            log.status(self.prettypath, 'SIZE')
+            log.status(state.prettypath, 'SIZE')
 
         if full:
-            log.verbose(self.prettypath, 'CALCULATING')
-            if self._checksum != checksum(self._path):
+            if log.verbose:
+                log.status(state.prettypath, 'CALCULATING')
+            if self._checksum != checksum(state.path):
                 status = False
-                log.status(self.prettypath, 'CHECKSUM')
+                log.status(state.prettypath, 'CHECKSUM')
 
         return status
 
-    def update(self, log):
-        stat = os.stat(self._path)
+    def update(self, state, log):
+        stat = os.stat(state.path)
 
         if abs(self._timestamp - stat.st_mtime) > self.TIMEDIFF or self._size != stat.st_size or self._checksum == "":
-            log.verbose(self.prettypath, 'CALCULATING')
-            self._checksum = checksum(self._path)
+            if log.verbose:
+                log.status(state.prettypath, 'CALCULATING')
+            self._checksum = checksum(state.path)
             self._timestamp = int(stat.st_mtime)
             self._size = stat.st_size
-            log.status(self.prettypath, 'CHECKSUM')
+            log.status(state.prettypath, 'CHECKSUM')
 
-    def exists(self):
-        return os.path.isfile(self._path) and not os.path.islink(self._path) and realname(self._path)
+    def exists(self, state):
+        return os.path.isfile(state.path) and not os.path.islink(state.path) and realname(state.path)
 
-    def dumpchecksum(self, log):
+    def dumpchecksum(self, state, log):
         if self._checksum:
-            log.output(self._checksum + ' *' + self.prettypath.lstrip(os.sep).replace(os.sep, '/'))
+            log.output(self._checksum + ' *' + state.prettypath[1:]) # Remove leading '/'
+        else:
+            log.output('[Missing Checksum]' + ' ' * 14 + ' *' + state.prettypath[1:])
     
 class Directory(Node):
     """ A directory node """
@@ -236,81 +257,83 @@ class Directory(Node):
 
     @staticmethod
     def load(parent, xml):
-        name = xml.getAttribute('name')
+        name = xml.get('name')
         dir = Directory(parent, name)
 
-        for child in xml.childNodes:
-            if child.nodeType != child.ELEMENT_NODE:
-                continue;
-            
-            if child.nodeName == 'symlink':
+        for child in xml:
+            if child.tag == 'symlink':
                 Symlink.load(dir, child)
-            elif child.nodeName == 'directory':
+            elif child.tag == 'directory':
                 Directory.load(dir, child)
-            elif child.nodeName == 'file':
+            elif child.tag == 'file':
                 File.load(dir, child)
 
         return dir
 
     def save(self, xml):
-        doc = xml.ownerDocument
-
-        child = doc.createElement('directory')
-        child.setAttribute('name', self._name)
+        child = ET.SubElement(xml, 'directory')
+        child.set('name', self._name)
 
         for name in sorted(self._children):
             self._children[name].save(child)
 
-        xml.appendChild(child)
+        return child
 
     def ignore(self, name):
         return False
 
-    def check(self, log, full=False):
-        log.verbose(self.prettypath, 'PROCESSING')
+    def check(self, state, log, full=False):
+        if log.verbose:
+            log.status(state.prettypath, 'PROCESSING')
         status = True
 
         # Check for missing
         for i in sorted(self._children):
-            if not self._children[i].exists():
-                log.status(self._children[i].prettypath, 'MISSING')
+            newstate = state.clone(i)
+            if not self._children[i].exists(newstate):
+                log.status(newstate.prettypath , 'MISSING')
                 status = False
 
         # Check for new items
-        for i in sorted(listdir(self._path)):
+        for i in sorted(listdir(state.path)):
+            newstate = state.clone(i)
             if not self.ignore(i) and not i in self._children:
-                log.status(self.prettypath + os.sep + i, 'NEW')
+                log.status(newstate.prettypath, 'NEW')
                 status = False
 
                 # Show new child items
-                path = self._path + os.sep + i
+                path = state.path + os.sep + i
                 if os.path.isdir(path) and not os.path.islink(path):
                     item = Directory(self, i)
-                    item.check(log, False) # New directory, no need to calc checksums
+                    item.check(newstate, log, False) # New directory, no need to calc checksums
                     del self._children[i]
 
         # Check children
         for i in sorted(self._children):
-            if self._children[i].exists():
-                if self._children[i].check(log, full) == False:
+            newstate = state.clone(i)
+            if self._children[i].exists(newstate):
+                if self._children[i].check(newstate, log, full) == False:
                     status = False
 
         return status
 
-    def update(self, log):
-        log.verbose(self.prettypath, 'PROCESSING')
+    def update(self, state, log):
+        if log.verbose:
+            log.status(state.prettypath, 'PROCESSING')
 
         # Check for missing items
         for i in sorted(self._children):
-            if not self._children[i].exists():
+            newstate = state.clone(i)
+            if not self._children[i].exists(newstate):
                 item = self._children[i]
                 del self._children[i]
-                log.status(item.prettypath, 'DELETED')
+                log.status(newstate.prettypath, 'DELETED')
 
         # Add new items
-        for i in sorted(listdir(self._path)):
+        for i in sorted(listdir(state.path)):
+            newstate = state.clone(i)
             if not self.ignore(i) and not i in self._children:
-                path = self._path + os.sep + i
+                path = newstate.path
 
                 if os.path.islink(path):
                     item = Symlink(self, i, "")
@@ -321,18 +344,22 @@ class Directory(Node):
                 else:
                     continue # Unsupported item type, will be reported missing with check
 
-                log.status(item.prettypath, 'ADDED')
+                log.status(newstate.prettypath, 'ADDED')
 
         # Update all item including newly added items
         for i in sorted(self._children):
-            self._children[i].update(log)
+            newstate = state.clone(i)
+            self._children[i].update(newstate, log)
 
-    def exists(self):
-        return os.path.isdir(self._path) and not os.path.islink(self._path) and realname(self._path)
+    def exists(self, state):
+        return os.path.isdir(state.path) and not os.path.islink(state.path) and realname(state.path)
 
-    def dumpchecksum(self, log):
+    def dumpchecksum(self, state, log):
+        if log.verbose and not isinstance(self, Collection):
+            log.output('[Directory]' + ' ' * 21 + ' *' + state.prettypath[1:])
         for i in sorted(self._children):
-            self._children[i].dumpchecksum(log)
+            newstate = state.clone(i)
+            self._children[i].dumpchecksum(newstate, log)
 
 
 class Collection(Directory):
@@ -363,41 +390,37 @@ class Collection(Directory):
     def load(root):
         """ Function to load a file and return the collection object. """
         coll = Collection(root)
-        dom = minidom.parse(coll._filename)
+        tree = ET.parse(coll._filename)
 
-        root = dom.documentElement
-        if root.nodeName != 'collection':
+        root = tree.getroot()
+        if root.tag != 'collection':
             return None
 
-        for child in root.childNodes:
-            if child.nodeType != child.ELEMENT_NODE:
-                continue
-
-            if child.nodeName == 'symlink':
+        for child in root:
+            if child.tag == 'symlink':
                 Symlink.load(coll, child)
-            elif child.nodeName == 'directory':
+            elif child.tag == 'directory':
                 Directory.load(coll, child)
-            elif child.nodeName == 'file':
+            elif child.tag == 'file':
                 File.load(coll, child)
 
         return coll
 
     def save(self):
-        doc = minidom.Document()
-        root = doc.createElement('collection')
+        root = ET.Element('collection')
 
         for name in sorted(self._children):
             self._children[name].save(root)
 
-        doc.appendChild(root)
-
+        tree = ET.ElementTree(root)
         if os.path.exists(self._filename):
             if os.path.exists(self._backup):
                 os.unlink(self._backup)
             os.rename(self._filename, self._backup)
 
-        with codecs.open(self._filename, 'w', encoding='utf-8') as handle:
-            doc.writexml(handle, '', '  ', '\n', 'utf-8')
+        # We don't need to use codecs here as ElementTree actually does the
+        # encoding based on the enconding= parameter, unlike xml.dom.minidom
+        tree.write(self._filename, encoding='utf-8', xml_declaration=True)
 
 # Program entry point
 ################################################################################
@@ -431,6 +454,7 @@ def main():
 
     # Do stuff
     root = os.getcwd()
+    state = State(root)
     log = Logger(verbose)
 
     if action == 'create':
@@ -438,19 +462,19 @@ def main():
         coll.save()
     elif action == 'check':
         coll = Collection.load(root)
-        if not coll.check(log):
+        if not coll.check(state, log):
             sys.exit(-1)
     elif action == 'verify':
         coll = Collection.load(root)
-        if not coll.check(log, True):
+        if not coll.check(state, log, True):
             sys.exit(-1)
     elif action == 'update':
         coll = Collection.load(root)
-        coll.update(log)
+        coll.update(state, log)
         coll.save()
     elif action == 'dump':
         coll = Collection.load(root)
-        coll.dumpchecksum(log)
+        coll.dumpchecksum(state, log)
 
 if __name__ == '__main__':
     main()
