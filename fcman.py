@@ -56,14 +56,6 @@ class Logger(object):
     def handler(cls, signum, frame):
         Logger._signaled = True
 
-    @property
-    def verbose(self):
-        if Logger._signaled:
-            Logger._signaled = False
-            return True
-
-        return self._verbose
-
     def __init__(self, verbose):
         self._verbose = verbose
 
@@ -71,12 +63,15 @@ class Logger(object):
         sys.stdout.write(msg + '\n')
         sys.stdout.flush()
 
-    def message(self, msg):
-        sys.stderr.write(msg + '\n');
-        sys.stderr.flush()
-    
     def status(self, path, status):
-        self.message(status + ': ' + path)
+        sys.stdout.write(status + ': ' + path + '\n')
+        sys.stdout.flush()
+
+    def verbose(self, path, status):
+        if Logger._signaled or self._verbose:
+            Logger._signaled = False
+            sys.stderr.write(status + ': ' + path + '\n')
+            sys.stderr.flush()
 
 try:
     import signal
@@ -175,8 +170,7 @@ class Symlink(Node):
         return os.path.islink(state.path) and realname(state.path)
 
     def dumpchecksum(self, state, log):
-        if log.verbose:
-            log.output('[Symbolic Link]' + ' ' * 17 + ' *' + state.prettypath[1:] + ' -> ' + self._target)
+        log.verbose(state.prettypath, 'PROCESSING')
 
 class File(Node):
     """ A file node """
@@ -220,8 +214,7 @@ class File(Node):
             log.status(state.prettypath, 'SIZE')
 
         if full:
-            if log.verbose:
-                log.status(state.prettypath, 'CALCULATING')
+            log.verbose(state.prettypath, 'PROCESSING')
             if self._checksum != checksum(state.path):
                 status = False
                 log.status(state.prettypath, 'CHECKSUM')
@@ -232,8 +225,7 @@ class File(Node):
         stat = os.stat(state.path)
 
         if abs(self._timestamp - stat.st_mtime) > self.TIMEDIFF or self._size != stat.st_size or self._checksum == "":
-            if log.verbose:
-                log.status(state.prettypath, 'CALCULATING')
+            log.verbose(state.prettypath, 'PROCESSING')
             self._checksum = checksum(state.path)
             self._timestamp = int(stat.st_mtime)
             self._size = stat.st_size
@@ -246,7 +238,7 @@ class File(Node):
         if self._checksum:
             log.output(self._checksum + ' *' + state.prettypath[1:]) # Remove leading '/'
         else:
-            log.output('[Missing Checksum]' + ' ' * 14 + ' *' + state.prettypath[1:])
+            log.verbose(self.prettypath, 'MISSING CHECKSUM')
     
 class Directory(Node):
     """ A directory node """
@@ -283,8 +275,7 @@ class Directory(Node):
         return False
 
     def check(self, state, log, full=False):
-        if log.verbose:
-            log.status(state.prettypath, 'PROCESSING')
+        log.verbose(state.prettypath, 'PROCESSING')
         status = True
 
         # Check for missing
@@ -318,8 +309,7 @@ class Directory(Node):
         return status
 
     def update(self, state, log):
-        if log.verbose:
-            log.status(state.prettypath, 'PROCESSING')
+        log.verbose(state.prettypath, 'PROCESSING')
 
         # Check for missing items
         for i in sorted(self._children):
@@ -355,8 +345,8 @@ class Directory(Node):
         return os.path.isdir(state.path) and not os.path.islink(state.path) and realname(state.path)
 
     def dumpchecksum(self, state, log):
-        if log.verbose and not isinstance(self, Collection):
-            log.output('[Directory]' + ' ' * 21 + ' *' + state.prettypath[1:])
+        if not isinstance(self, Collection):
+            log.verbose(state.prettypath, 'PROCESSING')
         for i in sorted(self._children):
             newstate = state.clone(i)
             self._children[i].dumpchecksum(newstate, log)
