@@ -12,7 +12,7 @@ except ImportError:
     from xml.etree import ElementTree as ET
 
 
-version = "20131201-1"
+version = "20150614-1"
 
 # Utility functions and stuff
 ################################################################################
@@ -412,13 +412,198 @@ class Collection(Directory):
         # encoding based on the enconding= parameter, unlike xml.dom.minidom
         tree.write(self._filename, encoding='utf-8', xml_declaration=True)
 
+    def checkdeps(self, state, log):
+        checker = DependencyChecker()
+        return checker.check(self, state, log)
+
+
+# Package/dependency classes
+################################################################################
+class Package(object):
+    """ This represents a named/versioned package. """
+
+    def __init__(self, name, version=None):
+        """ Initialize the package. """
+        self._name = name
+        self._version = version
+
+    def satisfies(self, depends):
+        """ Determine if a package satisfies a dependency. """
+
+        # Name must match
+        if depends._name != self._name:
+            return False
+
+        if depends._min is not None or depends._max is not None:
+
+            # If any dependency version is set, package version must be set to match
+            if self._version is None:
+                return False
+
+            if depends._min is not None and self._compare(self._version, depends._min) < 0:
+                return False
+
+            if depends._max is not None and self._compare(self._version, depends._max) > 0:
+                return False
+
+        # If we got here, everything matched
+        return True
+
+    def _compare(self, us, them):
+        """ Compare two version numbers. """
+        # Split
+        us = map(int, us.split('.'))
+        them = map(int, them.split('.'))
+
+        # Make the same length
+        diff = len(us) - len(them)
+        if diff > 0:
+            them.extend([0] * diff)
+        elif diff < 0:
+            us.extend([0] * -diff)
+
+        # compare
+        return cmp(us, them)
+
+
+class Dependency(object):
+    """ This represents a dependency. """
+
+    def __init__(self, prettypath, item, name, min=None, max=None):
+        """ Initialize the package. """
+        self._prettypath = prettypath
+        self._item = item
+        self._name = name
+        self._min = min
+        self._max = max
+
+    def __str__(self):
+        """ Compute a string. """
+        s = self._name
+
+        if self._min is not None or self._max is not None:
+            s += ' ('
+
+            if self._min is not None:
+                s += '>=' + self._min
+                if self._max is not None:
+                    s += ', '
+
+            if self._max is not None:
+                s += '<=' + self._max
+
+            s += ')'
+
+        return s
+
+    def satisfied(self, packages):
+        """ Determine if this dependency is satisfied by any available package. """
+        if self._name in packages:
+            for p in packages[self._name]:
+                if p.satisfies(self):
+                    return True
+
+        return False
+
+
+class DependencyChecker(object):
+    """ Dependency checker """
+
+    def __init__(self):
+        """ Initialize the dependency checker. """
+        self._packages = {}
+        self._dependencies = []
+
+    def _load(self, node, state, log):
+        """ Load information from the node. """
+        status = True
+        for i in sorted(node._children):
+            newstate = state.clone(i)
+            newnode = node._children[i]
+
+            if isinstance(newnode, File) and newnode._name == 'packages.xml' and newnode.exists(newstate):
+                if not self._loadFile(newstate, log):
+                    status = False
+            elif isinstance(newnode, Directory):
+                if not self._load(newnode, newstate, log):
+                    status = False
+
+        return status
+
+    def _loadFile(self, state, log):
+        """ Load package information from a file. """
+        log.verbose(state.prettypath, "LOADING")
+
+        # Parse file and get root
+        try:
+            tree = ET.parse(state.path)
+        except ET.ParseError as e:
+            log.status(state.prettypath, 'LOAD ERROR')
+            log.output(str(e))
+            return False
+
+        root = tree.getroot()
+        if root.tag != 'packages':
+            log.status(state.prettypath, 'LOAD ERROR')
+            return False
+
+        # Load all items
+        for i in root.findall('item'):
+            self._loadItem(i, state, log)
+
+        # Loaded successfully
+        return True
+
+    def _loadItem(self, item, state, log):
+        """ Load item specific information from the package. """
+
+        name = item.get('name', '')
+
+        # Packages
+        for p in item.findall('package'):
+            pname = p.get('name', '')
+            pversion = p.get('version')
+
+            if not pname in self._packages:
+                self._packages[pname] = []
+
+            self._packages[pname].append(Package(pname, pversion))
+
+        # Dependencies
+        for d in item.findall('depends'):
+            dname = d.get('name', '')
+            dmin = d.get('min')
+            dmax = d.get('max')
+
+            self._dependencies.append(Dependency(state.prettypath, name, dname, dmin, dmax))
+
+    def check(self, coll, state, log):
+        """ Check the dependencies. """
+        status = True
+
+        # Load the information
+        if not self._load(coll, state, log):
+            status = False
+
+        # Still try to check what we have loaded
+        last = None
+        for i in self._dependencies:
+            if not i.satisfied(self._packages):
+                status = False
+                if not last == i._prettypath:
+                    log.status(i._prettypath, 'DEPENDS')
+                    last = i._prettypath
+                log.output(i._item + ": " + str(i))
+
+        return status
+
 # Program entry point
 ################################################################################
 def usage():
     print('Usage: ' + sys.argv[0] + ' [-v] <action>')
     print('')
     print('  -v:        Verbose status messages')
-    print('  action:    create, check, verify, update, dump')
+    print('  action:    create, check, checkdeps, verify, update, dump')
     print('')
 
 def main():
@@ -438,7 +623,7 @@ def main():
         verbose = False
         action = sys.argv[1]
 
-    if not action in ('create', 'check', 'verify', 'update', 'dump'):
+    if not action in ('create', 'check', 'checkdeps', 'verify', 'update', 'dump'):
         usage()
         sys.exit(-1)
 
@@ -453,6 +638,10 @@ def main():
     elif action == 'check':
         coll = Collection.load(root)
         if not coll.check(state, log):
+            sys.exit(-1)
+    elif action == 'checkdeps':
+        coll = Collection.load(root)
+        if not coll.checkdeps(state, log):
             sys.exit(-1)
     elif action == 'verify':
         coll = Collection.load(root)
