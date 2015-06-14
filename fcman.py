@@ -6,6 +6,9 @@ import os
 import time
 import hashlib
 
+import glob
+import codecs
+
 try:
     from xml.etree import cElementTree as ET
 except ImportError:
@@ -59,19 +62,37 @@ class Logger(object):
     def __init__(self, verbose):
         self._verbose = verbose
 
+        # Perform proper encoding for the output.
+        # On Python 2, stdout/stderr are 8 bit interfaces.  On Python3
+        # they expect unicode data and will convert, and can also take binary
+        # data.  So we really only need to handle converting on Python 2
+        if sys.version[0] == '2':
+            enc = sys.stdout.encoding
+            if enc is None:
+                enc = 'utf8'
+            self._stdout = codecs.getwriter(enc)(sys.stdout)
+
+            enc = sys.stderr.encoding
+            if enc is None:
+                enc = 'utf8'
+            self._stderr = codecs.getwriter(enc)(sys.stderr)
+        else:
+            self._stdout = sys.stdout
+            self._stderr = sys.stderr
+
     def output(self, msg):
-        sys.stdout.write(msg + '\n')
-        sys.stdout.flush()
+        self._stdout.write(msg + '\n')
+        self._stdout.flush()
 
     def status(self, path, status):
-        sys.stdout.write(status + ': ' + path + '\n')
-        sys.stdout.flush()
+        self._stdout.write(status + ': ' + path + '\n')
+        self._stdout.flush()
 
     def verbose(self, path, status):
         if Logger._signaled or self._verbose:
             Logger._signaled = False
-            sys.stderr.write(status + ': ' + path + '\n')
-            sys.stderr.flush()
+            self._stderr.write(status + ': ' + path + '\n')
+            self._stderr.flush()
 
 try:
     import signal
@@ -236,7 +257,7 @@ class File(Node):
 
     def dumpchecksum(self, state, log):
         if self._checksum:
-            log.output(self._checksum + ' *' + state.prettypath[1:]) # Remove leading '/'
+            log.output(self._checksum + ' *' + state.prettypath[2:]) # Remove leading './'
         else:
             log.verbose(self.prettypath, 'MISSING CHECKSUM')
     
@@ -452,8 +473,8 @@ class Package(object):
     def _compare(self, us, them):
         """ Compare two version numbers. """
         # Split
-        us = map(int, us.split('.'))
-        them = map(int, them.split('.'))
+        us = list(map(int, us.split('.')))
+        them = list(map(int, them.split('.')))
 
         # Make the same length
         diff = len(us) - len(them)
@@ -463,7 +484,12 @@ class Package(object):
             us.extend([0] * -diff)
 
         # compare
-        return cmp(us, them)
+        if us < them:
+            return -1
+        elif us > them:
+            return 1
+        else:
+            return 0
 
 
 class Dependency(object):
@@ -513,6 +539,7 @@ class DependencyChecker(object):
         """ Initialize the dependency checker. """
         self._packages = {}
         self._dependencies = []
+        self._check = []
 
     def _load(self, node, state, log):
         """ Load information from the node. """
@@ -558,6 +585,11 @@ class DependencyChecker(object):
         """ Load item specific information from the package. """
 
         name = item.get('name', '')
+        check = item.get('check')
+
+        # Check
+        if check is not None:
+            self._check.append((state.path, state.prettypath, name, check))
 
         # Packages
         for p in item.findall('package'):
@@ -585,6 +617,18 @@ class DependencyChecker(object):
         if not self._load(coll, state, log):
             status = False
 
+        # Verify check items exist
+        last = None
+        for i in self._check:
+            gpat = os.path.join(os.path.dirname(i[0]), *(i[3].split('/')))
+            gres = glob.glob(gpat)
+            if not gres:
+                status = False
+                if not last == i[1]:
+                    log.status(i[1], 'CHECK')
+                    last = i[1]
+                log.output(i[2] + ': '+ i[3])
+
         # Still try to check what we have loaded
         last = None
         for i in self._dependencies:
@@ -593,7 +637,7 @@ class DependencyChecker(object):
                 if not last == i._prettypath:
                     log.status(i._prettypath, 'DEPENDS')
                     last = i._prettypath
-                log.output(i._item + ": " + str(i))
+                log.output(i._item + ': ' + str(i))
 
         return status
 

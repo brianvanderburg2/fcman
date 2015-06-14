@@ -47,9 +47,11 @@ it will be used via "fcman checkdeps"
     <packages>
 
         <!--
-            You may have more than one package in the file.
+            You may have more than one package in the file. Also, a check
+            value can be used to check if something exists relative to the
+            location of the packages.xml file.  This uses Python glob.glob
         -->
-        <item name="displayname">
+        <item name="displayname" check="packagename-*.tar.xz">
             <!--
                 Describe what package names and versions the item provides.
             -->
