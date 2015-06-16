@@ -41,8 +41,20 @@ It is possible to include dependency information in the collection and check
 that dependencies are satisfied.  This is achieved by placing a file named
 packages.xml within a directory and then describing within the file any
 package that are provided.  This file may be placed in more than one directory.
+It is also possible to create a directory named packages.xml and any XML
+files in that directory and subdirectories will be read as packages as well.
 Note that the file must be added to the collection via "fcman update" before
 it will be used via "fcman checkdeps"
+
+Note that the checkdeps command only checks dependencies.  It does not check
+that the "packages.xml" files exists.  If a packages file is in the collection
+but missing from disc, it is silently skipped. Use the check command to make
+sure all files in the collection are present.  Also, if a packages file is
+not an fcman packages file, by missing the namespace, it is ignored and a
+message is printed.  This does not cause an error status code.  This is to
+ensure that if fcman is used on a documents folder with some documents
+that may be named packages.xml by some chance, it doesn't treat those as
+errors.
 
     <packages xmlns="urn:mrbavii.fcman:packages">
 

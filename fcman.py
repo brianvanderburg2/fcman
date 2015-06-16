@@ -548,18 +548,21 @@ class DependencyChecker(object):
         self._dependencies = []
         self._check = []
 
-    def _load(self, node, state, log):
+    def _load(self, node, state, log, always=False):
         """ Load information from the node. """
         status = True
         for i in sorted(node._children):
             newstate = state.clone(i)
             newnode = node._children[i]
 
-            if isinstance(newnode, File) and newnode._name == 'packages.xml' and newnode.exists(newstate):
-                if not self._loadFile(newstate, log):
-                    status = False
+            if isinstance(newnode, File):
+                if newnode.exists(newstate) and (i == 'packages.xml' or (always and i.endswith('.xml'))):
+                    if not self._loadFile(newstate, log):
+                        status = False
             elif isinstance(newnode, Directory):
-                if not self._load(newnode, newstate, log):
+                # If the directory is named "packages.xml", load all XML files under that directory
+                # and subdirectories.
+                if not self._load(newnode, newstate, log, always or i == 'packages.xml'):
                     status = False
 
         return status
