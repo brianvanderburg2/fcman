@@ -15,10 +15,17 @@ except ImportError:
     from xml.etree import ElementTree as ET
 
 
-version = "20150614-1"
+version = "20150615-1"
 
 # Utility functions and stuff
 ################################################################################
+
+# Use namespaces
+NS_COLLECTION = "{urn:mrbavii.fcman:collection}"
+NS_PACKAGES =   "{urn:mrbavii.fcman:packages}"
+
+ET.register_namespace('c', NS_COLLECTION[1:-1])
+ET.register_namespace('p', NS_PACKAGES[1:-1])
 
 def listdir(path):
     # Make os.listdir return unicode names by passing it a unicode path
@@ -167,7 +174,7 @@ class Symlink(Node):
         return Symlink(parent, name, target)
 
     def save(self, xml):
-        child = ET.SubElement(xml, 'symlink')
+        child = ET.SubElement(xml, NS_COLLECTION + 'symlink')
         child.set('name', self._name)
         child.set('target', self._target)
 
@@ -214,7 +221,7 @@ class File(Node):
         return File(parent, name, int(size), int(timestamp), checksum)
 
     def save(self, xml):
-        child = ET.SubElement(xml, 'file')
+        child = ET.SubElement(xml, NS_COLLECTION + 'file')
         child.set('name', self._name)
         child.set('size', str(self._size))
         child.set('timestamp', str(self._timestamp))
@@ -274,17 +281,17 @@ class Directory(Node):
         dir = Directory(parent, name)
 
         for child in xml:
-            if child.tag == 'symlink':
+            if child.tag in ('symlink', NS_COLLECTION + 'symlink'):
                 Symlink.load(dir, child)
-            elif child.tag == 'directory':
+            elif child.tag in ('directory', NS_COLLECTION + 'directory'):
                 Directory.load(dir, child)
-            elif child.tag == 'file':
+            elif child.tag in ('file', NS_COLLECTION + 'file'):
                 File.load(dir, child)
 
         return dir
 
     def save(self, xml):
-        child = ET.SubElement(xml, 'directory')
+        child = ET.SubElement(xml, NS_COLLECTION + 'directory')
         child.set('name', self._name)
 
         for name in sorted(self._children):
@@ -404,21 +411,21 @@ class Collection(Directory):
         tree = ET.parse(coll._filename)
 
         root = tree.getroot()
-        if root.tag != 'collection':
+        if not root.tag in ('collection', NS_COLLECTION + 'collection'):
             return None
 
         for child in root:
-            if child.tag == 'symlink':
+            if child.tag in ('symlink', NS_COLLECTION + 'symlink'):
                 Symlink.load(coll, child)
-            elif child.tag == 'directory':
+            elif child.tag in ('directory', NS_COLLECTION + 'directory'):
                 Directory.load(coll, child)
-            elif child.tag == 'file':
+            elif child.tag in ('file', NS_COLLECTION + 'file'):
                 File.load(coll, child)
 
         return coll
 
     def save(self):
-        root = ET.Element('collection')
+        root = ET.Element(NS_COLLECTION + 'collection')
 
         for name in sorted(self._children):
             self._children[name].save(root)
@@ -431,7 +438,7 @@ class Collection(Directory):
 
         # We don't need to use codecs here as ElementTree actually does the
         # encoding based on the enconding= parameter, unlike xml.dom.minidom
-        tree.write(self._filename, encoding='utf-8', xml_declaration=True)
+        tree.write(self._filename, encoding='utf-8', xml_declaration=True, method='xml')
 
     def checkdeps(self, state, log):
         checker = DependencyChecker()
@@ -570,12 +577,12 @@ class DependencyChecker(object):
             return False
 
         root = tree.getroot()
-        if root.tag != 'packages':
-            log.status(state.prettypath, 'LOAD ERROR')
-            return False
+        if root.tag != NS_PACKAGES + 'packages':
+            log.status(state.prettypath, 'NOTPACKAGES')
+            return True # If it is not a fcman packages, just skip it
 
         # Load all items
-        for i in root.findall('item'):
+        for i in root.findall(NS_PACKAGES + 'item'):
             self._loadItem(i, state, log)
 
         # Loaded successfully
@@ -587,13 +594,13 @@ class DependencyChecker(object):
         name = item.get('name', '')
 
         # Check
-        for c in item.findall('check'):
+        for c in item.findall(NS_PACKAGES + 'check'):
             cname = c.get('path', '').split(':')
             for part in cname:
                 self._check.append((state.path, state.prettypath, name, part))
 
         # Packages
-        for p in item.findall('package'):
+        for p in item.findall(NS_PACKAGES + 'package'):
             pname = p.get('name', '').split(':')
             pversion = p.get('version')
 
@@ -604,7 +611,7 @@ class DependencyChecker(object):
                 self._packages[part].append(Package(part, pversion))
 
         # Dependencies
-        for d in item.findall('depends'):
+        for d in item.findall(NS_PACKAGES + 'depends'):
             dname = d.get('name', '').split(':')
             dmin = d.get('min')
             dmax = d.get('max')

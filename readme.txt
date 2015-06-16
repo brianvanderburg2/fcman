@@ -44,7 +44,7 @@ package that are provided.  This file may be placed in more than one directory.
 Note that the file must be added to the collection via "fcman update" before
 it will be used via "fcman checkdeps"
 
-    <packages>
+    <packages xmlns="urn:mrbavii.fcman:packages">
 
         <!--
             You may have more than one package in the file. Also, a check
