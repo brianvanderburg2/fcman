@@ -10,9 +10,12 @@ import glob
 import codecs
 
 try:
-    from xml.etree import cElementTree as ET
+    from lxml import etree as ET
 except ImportError:
-    from xml.etree import ElementTree as ET
+    try:
+        from xml.etree import cElementTree as ET
+    except ImportError:
+        from xml.etree import ElementTree as ET
 
 
 version = "20150615-1"
