@@ -72,6 +72,8 @@ class Logger(object):
     def __init__(self, verbose):
         self._verbose = verbose
 
+        self._last = None
+
         # Perform proper encoding for the output.
         # On Python 2, stdout/stderr are 8 bit interfaces.  On Python3
         # they expect unicode data and will convert, and can also take binary
@@ -90,19 +92,35 @@ class Logger(object):
             self._stdout = sys.stdout
             self._stderr = sys.stderr
 
-    def output(self, msg):
-        self._stdout.write(msg + '\n')
-        self._stdout.flush()
+    def output(self, msg, stderr=False):
+        stream = self._stderr if stderr else self._stdout
 
-    def status(self, path, status):
-        self._stdout.write(status + ': ' + path + '\n')
-        self._stdout.flush()
+        stream.write(msg + '\n')
+        stream.flush()
 
-    def verbose(self, path, status):
-        if Logger._signaled or self._verbose:
-            Logger._signaled = False
-            self._stderr.write(status + ': ' + path + '\n')
-            self._stderr.flush()
+    def status(self, path, status, msg=None, stderr=False, verbose=False):
+        if verbose:
+            if Logger._signaled or self._verbose:
+                Logger._signaled = False
+            else:
+                return
+
+        stream = self._stderr if stderr else self._stdout
+
+        check = (path, status, stderr)
+        if check != self._last:
+            self._last = check
+            stream.write(status + ': ' + path + '\n')
+
+        if msg:
+            stream.write(' > ' + msg + '\n')
+
+        stream.flush()
+
+    def verbose(self, path, status, msg=None, stderr=True):
+        # Same as status, but use stderr by default and
+        # only when verbose is set
+        self.status(path, status, msg, stderr, True)
 
 try:
     import signal
@@ -578,8 +596,7 @@ class DependencyChecker(object):
         try:
             tree = ET.parse(state.path)
         except ET.ParseError as e:
-            log.status(state.prettypath, 'LOAD ERROR')
-            log.output(str(e))
+            log.status(state.prettypath, 'LOAD ERROR', str(e))
             return False
 
         root = tree.getroot()
@@ -634,26 +651,18 @@ class DependencyChecker(object):
             status = False
 
         # Verify check items exist
-        last = None
         for i in self._check:
             gpat = os.path.join(os.path.dirname(i[0]), *(i[3].split('/')))
             gres = glob.glob(gpat)
             if not gres:
                 status = False
-                if not last == i[1]:
-                    log.status(i[1], 'CHECK')
-                    last = i[1]
-                log.output(i[2] + ': '+ i[3])
+                log.status(i[1], 'CHECK', i[2] + ': ' + i[3])
 
         # Still try to check what we have loaded
-        last = None
         for i in self._dependencies:
             if not i.satisfied(self._packages):
                 status = False
-                if not last == i._prettypath:
-                    log.status(i._prettypath, 'DEPENDS')
-                    last = i._prettypath
-                log.output(i._item + ': ' + str(i))
+                log.status(i._prettypath, 'DEPENDS', i._item + ': ' + str(i))
 
         return status
 
