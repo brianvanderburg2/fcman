@@ -18,7 +18,7 @@ except ImportError:
         from xml.etree import ElementTree as ET
 
 
-version = "20150615-1"
+version = "20150616-1"
 
 # Utility functions and stuff
 ################################################################################
@@ -29,6 +29,28 @@ NS_PACKAGES =   "{urn:mrbavii.fcman:packages}"
 
 ET.register_namespace('c', NS_COLLECTION[1:-1])
 ET.register_namespace('p', NS_PACKAGES[1:-1])
+
+def checkattr(xml, attr, state, log):
+    if not isinstance(attr, (tuple, list)):
+        attr = (attr,)
+
+    for i in xml.keys():
+        if not i in attr:
+            line = getattr(xml, 'sourceline', None)
+            log.status(state.prettypath, 'XML', 'Unknown attribute: "' + i + ('" line: ' + str(line) if line else '"'))
+
+def checkchild(xml, children, state, log):
+    if not isinstance(children, (tuple, list)):
+        children = (children,)
+
+    for i in list(xml):
+        # Make sure it has a tag, not a comment or processing instruction
+        if not isinstance(i.tag, str):
+            continue
+
+        if not i.tag in children:
+            line = getattr(i, 'sourceline', None)
+            log.status(state.prettypath, 'XML', 'Unknown element: "' + str(i.tag) + ('" line: ' + str(line) if line else '"'))
 
 def listdir(path):
     # Make os.listdir return unicode names by passing it a unicode path
@@ -605,6 +627,7 @@ class DependencyChecker(object):
             return True # If it is not a fcman packages, just skip it
 
         # Load all items
+        checkchild(root, NS_PACKAGES + 'item', state, log)
         for i in root.findall(NS_PACKAGES + 'item'):
             self._loadItem(i, state, log)
 
@@ -614,16 +637,21 @@ class DependencyChecker(object):
     def _loadItem(self, item, state, log):
         """ Load item specific information from the package. """
 
+        checkchild(item, [NS_PACKAGES + i for i in ('check', 'package', 'depends')], state, log)
+        checkattr(item, 'name', state, log)
+
         name = item.get('name', '')
 
         # Check
         for c in item.findall(NS_PACKAGES + 'check'):
+            checkattr(c, 'path', state, log)
             cname = c.get('path', '').split(':')
             for part in cname:
                 self._check.append((state.path, state.prettypath, name, part))
 
         # Packages
         for p in item.findall(NS_PACKAGES + 'package'):
+            checkattr(p, ('name', 'version'), state, log)
             pname = p.get('name', '').split(':')
             pversion = p.get('version')
 
@@ -635,6 +663,7 @@ class DependencyChecker(object):
 
         # Dependencies
         for d in item.findall(NS_PACKAGES + 'depends'):
+            checkattr(d, ('name', 'min', 'max'), state, log)
             dname = d.get('name', '').split(':')
             dmin = d.get('min')
             dmax = d.get('max')
