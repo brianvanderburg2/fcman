@@ -51,19 +51,36 @@ it will be used via "fcman checkdeps"
             value can be used to check if something exists relative to the
             location of the packages.xml file.  This uses Python glob.glob
         -->
-        <item name="displayname" check="packagename-*.tar.xz">
+        <item name="displayname">
+            <!--
+                Provide a check for the existence of a file or directory.
+                The path attribute can contain multiple paths separated
+                by colons.  Multiple check elements may be specified.
+            -->
+            <check path="displayname-app*.exe" />
+            <check path="displayname-data*.exe />
+            <check path="displayname-app*.exe:displayname-data*.exe" />
+
             <!--
                 Describe what package names and versions the item provides.
+                Multiple package names can be defined in a single element by
+                separating the names with a colon.  All such names will use
+                the same version information, if specified.
             -->
             <package name="file" />
             <package name="libfile" version="1.0" />
+            <package name="foo:bar" /> <!-- Proviles "foo" and "bar" -->
 
             <!--
-                Describe any dependencies of this package.
+                Describe any dependencies of this package.  Multiple dependency
+                names can be defined in a single element by separating the names
+                with a color.  All such names will use the same min and max
+                version information, if specified.
             -->
             <depends name="glib" />
             <depends name="libother" min="1.0" />
             <depends name="libnext" min="1.0" max="1.99" />
+            <depends name="libsdl:libsdl-image:libsdl-mixer" />
         </item>
 
     </packages>

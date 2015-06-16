@@ -585,29 +585,32 @@ class DependencyChecker(object):
         """ Load item specific information from the package. """
 
         name = item.get('name', '')
-        check = item.get('check')
 
         # Check
-        if check is not None:
-            self._check.append((state.path, state.prettypath, name, check))
+        for c in item.findall('check'):
+            cname = c.get('path', '').split(':')
+            for part in cname:
+                self._check.append((state.path, state.prettypath, name, part))
 
         # Packages
         for p in item.findall('package'):
-            pname = p.get('name', '')
+            pname = p.get('name', '').split(':')
             pversion = p.get('version')
 
-            if not pname in self._packages:
-                self._packages[pname] = []
+            for part in pname:
+                if not part in self._packages:
+                    self._packages[part] = []
 
-            self._packages[pname].append(Package(pname, pversion))
+                self._packages[part].append(Package(part, pversion))
 
         # Dependencies
         for d in item.findall('depends'):
-            dname = d.get('name', '')
+            dname = d.get('name', '').split(':')
             dmin = d.get('min')
             dmax = d.get('max')
 
-            self._dependencies.append(Dependency(state.prettypath, name, dname, dmin, dmax))
+            for part in dname:
+                self._dependencies.append(Dependency(state.prettypath, name, part, dmin, dmax))
 
     def check(self, coll, state, log):
         """ Check the dependencies. """
