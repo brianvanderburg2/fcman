@@ -345,6 +345,15 @@ class Directory(Node):
     def ignore(self, name):
         return False
 
+    def _missingdir(self, state, log):
+        for i in self._children:
+            newstate = state.clone(i)
+            newnode = self._children[i]
+
+            log.status(newstate.prettypath, 'MISSING')
+            if isinstance(newnode, Directory):
+                newnode._missingdir(newstate, log)
+
     def check(self, state, log, full=False):
         log.verbose(state.prettypath, 'PROCESSING')
         status = True
@@ -352,9 +361,16 @@ class Directory(Node):
         # Check for missing
         for i in sorted(self._children):
             newstate = state.clone(i)
-            if not self._children[i].exists(newstate):
+            newnode = self._children[i]
+
+            if not newnode.exists(newstate):
                 log.status(newstate.prettypath , 'MISSING')
                 status = False
+
+                # Report all subitems
+                if isinstance(newnode, Directory):
+                    newnode._missingdir(newstate, log)
+
 
         # Check for new items
         for i in sorted(listdir(state.path)):
