@@ -18,7 +18,7 @@ except ImportError:
         from xml.etree import ElementTree as ET
 
 
-version = "20150616-1"
+version = "20151202-1"
 
 # Utility functions and stuff
 ################################################################################
@@ -497,7 +497,8 @@ class Collection(Directory):
 
         # We don't need to use codecs here as ElementTree actually does the
         # encoding based on the enconding= parameter, unlike xml.dom.minidom
-        tree.write(self._filename, encoding='utf-8', xml_declaration=True, method='xml')
+        tree.write(self._filename, encoding='utf-8', xml_declaration=True,
+                   method='xml', pretty_print=True)
 
     def checkdeps(self, state, log):
         checker = DependencyChecker()
