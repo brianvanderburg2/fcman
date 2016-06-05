@@ -66,12 +66,22 @@ errors.
         <item name="displayname">
             <!--
                 Provide a check for the existence of a file or directory.
-                The path attribute can contain multiple paths separated
-                by colons.  Multiple check elements may be specified.
+                Multiple check elements may be specified.  An autoname and
+                autoversion attribute can be used to automatically generate
+                packages from the checked item.  The autoname attribute is
+                a plain name, or multiple names separated by colons.  The
+                autoversion attribute is a regular expression which will be
+                searched against each item returned by the glob.  If the search
+                succeeds, then a special group used as "(@)" will be used
+                to extract the version numbers.  "(@)" is replaced with
+                "(?P<version>[0-9\.]+)" for the regular expression.  The
+                search method is used, so it is not anchored to the beginning
+                or ending of the complete path unless the regular expression
+                causes it to be so.
             -->
-            <check path="displayname-app*.exe" />
+            <check path="displayname-app*.exe" autoname="package:package2"
+             autoversion="displayname-app(@).tar.*$"/>
             <check path="displayname-data*.exe />
-            <check path="displayname-app*.exe:displayname-data*.exe" />
 
             <!--
                 Describe what package names and versions the item provides.

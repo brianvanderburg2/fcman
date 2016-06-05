@@ -7,6 +7,7 @@ import time
 import hashlib
 
 import glob
+import re
 import codecs
 
 try:
@@ -18,7 +19,7 @@ except ImportError:
         from xml.etree import ElementTree as ET
 
 
-version = "20151202-1"
+version = "20160605-1"
 
 # Utility functions and stuff
 ################################################################################
@@ -599,6 +600,19 @@ class Dependency(object):
         return False
 
 
+class Check(object):
+    """ This represents a check item. """
+
+    def __init__(self, path, prettypath, item, glob, autoname, autoversion):
+        """ Initialize the check object. """
+        self._path = path
+        self._prettypath = prettypath
+        self._item = item
+        self._glob = glob
+        self._autoname = autoname
+        self._autoversion = autoversion
+
+
 class DependencyChecker(object):
     """ Dependency checker """
 
@@ -661,10 +675,13 @@ class DependencyChecker(object):
 
         # Check
         for c in item.findall(NS_PACKAGES + 'check'):
-            checkattr(c, 'path', state, log)
-            cname = c.get('path', '').split(':')
-            for part in cname:
-                self._check.append((state.path, state.prettypath, name, part))
+            checkattr(c, ('path', 'autoname', 'autoversion'), state, log)
+            cglob = c.get('path', '')
+            cautoname = c.get('autoname', None)
+            if cautoname:
+                cautoname = cautoname.split(':')
+            cautoversion = c.get('autoversion')
+            self._check.append(Check(state.path, state.prettypath, name, cglob, cautoname, cautoversion))
 
         # Packages
         for p in item.findall(NS_PACKAGES + 'package'):
@@ -698,11 +715,28 @@ class DependencyChecker(object):
 
         # Verify check items exist
         for i in self._check:
-            gpat = os.path.join(os.path.dirname(i[0]), *(i[3].split('/')))
+            gpat = os.path.join(os.path.dirname(i._path), *(i._glob.split('/')))
             gres = glob.glob(gpat)
             if not gres:
                 status = False
-                log.status(i[1], 'CHECK', i[2] + ': ' + i[3])
+                log.status(i._prettypath, 'CHECK', i._item + ': ' + i._glob)
+            elif i._autoname:
+                # Dynamically update the packages
+                for j in i._autoname:
+                    if not j in self._packages:
+                        self._packages[j] = []
+
+                    if i._autoversion:
+                        autoversion = i._autoversion.replace('(@)', '(?P<version>[0-9\.]+)')
+                        for k in gres:
+                            mo = re.search(autoversion, k)
+                            if mo:
+                                ver = mo.group('version')
+                                log.verbose(i._prettypath, "AUTOPKG", i._item + " [" + j + ":" + ver + "]")
+                                self._packages[j].append(Package(j, ver))
+                    else:
+                        log.verbose(i._prettypath, "AUTOPKG", i._item + " [" + j + "]")
+                        self._packages[j].append(Package(j, None))
 
         # Still try to check what we have loaded
         for i in self._dependencies:
