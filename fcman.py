@@ -473,13 +473,12 @@ class Collection(Directory):
         """ Function to load a file and return the collection object. """
         coll = Collection(root)
 
-        if not os.path.exists(coll._filename) and os.path.exists(coll._fallbackname):
-            dirname = os.path.dirname(coll._filename)
-            if not os.path.isdir(dirname):
-                os.makedirs(dirname)
-            os.rename(coll._fallbackname, coll._filename)
+        if os.path.isfile(coll._filename):
+            filename = coll._filename
+        else:
+            filename = coll._fallbackname
 
-        tree = ET.parse(coll._filename)
+        tree = ET.parse(filename)
 
         root = tree.getroot()
         if not root.tag in ('collection', NS_COLLECTION + 'collection'):
@@ -507,6 +506,13 @@ class Collection(Directory):
             if not os.path.isdir(i):
                 os.makedirs(i)
 
+        # Move old filename over
+        if os.path.exists(self._fallbackname):
+            if os.path.exists(self._backup):
+                os.unlink(self._backup)
+            os.rename(self._fallbackname, self._backup)
+
+        # Move new filename over
         if os.path.exists(self._filename):
             if os.path.exists(self._backup):
                 os.unlink(self._backup)
