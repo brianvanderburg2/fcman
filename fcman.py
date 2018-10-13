@@ -447,14 +447,18 @@ class Collection(Directory):
         """ Initialize the collection with the root of the collection. """
         Directory.__init__(self, None, root)
 
-        self._filename = os.path.join(root, 'collection.xml')
-        self._backup = os.path.join(root, 'collection.xml.' + time.strftime("%Y%m%d%H%M%S"))
+        self._filename = os.path.join(root, '_collection', 'collection.xml')
+        self._fallbackname = os.path.join(root, 'collection.xml')
+        self._backup = os.path.join(root, '_collection', 'backups', 'collection.xml.' + time.strftime("%Y%m%d%H%M%S"))
     
     def ignore(self, name):
         if name.startswith('collection.xml'):
             return True
 
         if name.lower().startswith('md5sum'):
+            return True
+
+        if name.startswith('_collection'):
             return True
 
         return False
@@ -468,6 +472,13 @@ class Collection(Directory):
     def load(root):
         """ Function to load a file and return the collection object. """
         coll = Collection(root)
+
+        if not os.path.exists(coll._filename) and os.path.exists(coll._fallbackname):
+            dirname = os.path.dirname(coll._filename)
+            if not os.path.isdir(dirname):
+                os.makedirs(dirname)
+            os.rename(coll._fallbackname, coll._filename)
+
         tree = ET.parse(coll._filename)
 
         root = tree.getroot()
@@ -491,6 +502,11 @@ class Collection(Directory):
             self._children[name].save(root)
 
         tree = ET.ElementTree(root)
+
+        for i in (os.path.dirname(j) for j in (self._backup, self._filename)):
+            if not os.path.isdir(i):
+                os.makedirs(i)
+
         if os.path.exists(self._filename):
             if os.path.exists(self._backup):
                 os.unlink(self._backup)
