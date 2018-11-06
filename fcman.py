@@ -8,6 +8,14 @@
 # stderror should be though of as program error:
     # If we can't load the xml files or badly formatted, that is program error (go to stderr)
     # If a file is missing during a check, that is utility error (go to stdout)
+# All string constants should be unicode
+# When reading from text files convert to unicode (read file as UTF-8)
+    # ini parser use readfp/readfile with codecs.open
+    # Ensure lxml reads in unicode
+# when reading file system (listdir), return unicode names
+# when checking file system, convert unicode to file system encoding
+# when writing to files, convert unicode to utf-8
+# when writing to stdout/stderr, convert unicode to correct encoding
 
 # {{{1 Meta information
 
@@ -1028,8 +1036,8 @@ class CheckMetaAction(Action):
         """ A simple version compare based only on numbers and periods. """
 
         try:
-            v1 = map(lambda v: int(v), v1.split("."))
-            v2 = map(lambda v: int(v), v2.split("."))
+            v1 = list(map(lambda v: int(v), v1.split(".")))
+            v2 = list(map(lambda v: int(v), v2.split(".")))
         except ValueError:
             return False
 
