@@ -864,11 +864,15 @@ class ExportAction(Action):
         coll.loadmeta()
         coll.applymeta()
 
+        if not os.path.isdir(coll._exportdir):
+            os.makedirs(coll._exportdir)
+
         md5file = os.path.join(coll._exportdir, "md5sums.txt")
         infofile = os.path.join(coll._exportdir, "info.txt")
 
         md5stream = self._writer.open(md5file)
         infostream = self._writer.open(infofile)
+
 
         streams = (md5stream, infostream)
 
