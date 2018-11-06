@@ -21,6 +21,11 @@ __version__ = "0.2.20181105.1"
 
 import argparse
 import codecs
+try:
+    from configparser import SafeConfigParser
+except ImportError:
+    from ConfigParser import SafeConfigParser
+import fnmatch
 import glob
 import hashlib
 import io
@@ -46,34 +51,8 @@ TIMEDIFF = 2
 
 # Use namespaces
 NS_COLLECTION = "{urn:mrbavii.fcman:collection}"
-NS_METAINFO =   "{urn:mrbavii.fcman:metainfo}"
 
 ET.register_namespace('c', NS_COLLECTION[1:-1])
-ET.register_namespace('m', NS_METAINFO[1:-1])
-
-def checkattr(xml, attr, prettypath):
-    """ Check that only the specified attributes are present on an xml node. """
-    if not isinstance(attr, (tuple, list)):
-        attr = (attr,)
-
-    for i in xml.keys():
-        if not i in attr:
-            line = getattr(xml, 'sourceline', None)
-            Logger.status(prettypath, 'XML', 'Unknown attribute: "' + i + ('" line: ' + str(line) if line else '"'), stderr=True)
-
-def checkchild(xml, children, prettypath):
-    """ Check that only the specified child nodes are present on an xml node. """
-    if not isinstance(children, (tuple, list)):
-        children = (children,)
-
-    for i in list(xml):
-        # Make sure it has a tag, not a comment or processing instruction
-        if not isinstance(i.tag, str):
-            continue
-
-        if not i.tag in children:
-            line = getattr(i, 'sourceline', None)
-            Logger.status(prettypath, 'XML', 'Unknown element: "' + str(i.tag) + ('" line: ' + str(line) if line else '"'), stderr=True)
 
 def listdir(path):
     """ List a directory, make sure returned names are unicode by passing a unicode path. """
@@ -109,8 +88,6 @@ def checksum(path):
             data = handle.read(4096000)
 
     return hasher.hexdigest()
-
-
 
 class StreamWriter(object):
     """ Write to a given stream. """
@@ -197,7 +174,7 @@ class Writer(object):
         return StreamWriter(handle, filename)
         
 
-# Collection classes
+# {{{1 Collection classes
 ################################################################################
 
 class Node(object):
@@ -207,7 +184,7 @@ class Node(object):
         """ Initialize the collection with the name, parent, and collection """
         self._name = name
         self._parent = parent
-        self._mata = []
+        self._meta = []
 
         # If this is RootDirectory, self._collection is set it it's __init__
         # before calling parent __init__, otherwise we set it from parent
@@ -311,13 +288,11 @@ class Directory(Node):
 
     @classmethod
     def load(cls, parent, xml):
-        name = xml.get('name')
-
         # If parent is a collection object, then we are a RootDirectory
-        # and parent is actually None
         if isinstance(parent, Collection):
             dir = RootDirectory(parent)
         else:
+            name = xml.get('name')
             dir = Directory(parent, name)
 
         for child in xml:
@@ -378,20 +353,22 @@ class RootDirectory(Directory):
 class Collection(object):
     """ This is the collection object. """
 
-    def __init__(self, root):
+    def __init__(self, root, writer, verbose):
         """ Initialize the collection with the root of the collection. """
 
         self._root = root
+        self._writer = writer
+        self._verbose = verbose
         self._rootdir = RootDirectory(self)
-        self._meta = []
+        self._allmeta = []
         self._filename = os.path.join(root, '_collection', 'collection.xml')
         self._fallbackname = os.path.join(root, 'collection.xml')
         self._backup = os.path.join(root, '_collection', 'backups', 'collection.xml.' + time.strftime("%Y%m%d%H%M%S"))
 
     @classmethod
-    def load(cls, root):
+    def load(cls, root, writer, verbose):
         """ Function to load a file and return the collection object. """
-        coll = Collection(root)
+        coll = Collection(root, writer, verbose)
 
         if os.path.isfile(coll._filename):
             filename = coll._filename
@@ -435,6 +412,7 @@ class Collection(object):
         tree.write(self._filename, encoding='utf-8', xml_declaration=True,
                    method='xml', pretty_print=True)
 
+
     def loadmeta(self):
         """ Walk over each directory for a "fcmanmeta.xml" file """
 
@@ -452,7 +430,7 @@ class Collection(object):
         for i in sorted(node._children):
             child = node._children[i]
 
-            if i == "fcmanmeta.xml":
+            if i == "fcmeta.ini":
                 if not self._loadmeta(child):
                     status = False
 
@@ -462,37 +440,73 @@ class Collection(object):
         return status
 
     def _loadmeta(self, node):
-        Logger.verbose(node.prettypath, 'LOADING')
-        try:
-            tree = ET.parse(node.path)
-        except (IOError, ET.ParseError) as e:
-            Logger.status(node.prettypath, 'LOAD ERROR', str(e), stderr=True)
+        if self._verbose:
+            self._writer.stdout.status(node.prettypath, 'LOADING')
+
+        config = SafeConfigParser()
+        read = config.read(node.prettypath)
+        if not read:
+            self._writer.stderr.status(node.prettypath, 'LOAD ERROR', str(e))
             return False
 
-        root = tree.getroot()
-        if not root.tag in ('metainfo', NS_METAINFO + 'metainfo'):
-            Logger.status(node.prettypath, 'NOTMETAINFO', stderr=True)
+        # Should at least have fcmeta section
+        if not config.has_section("fcman:fcmeta"):
+            self._writer.stderr.status(node.prettypath, 'NOTMETAINFO')
             return False
 
-        # Load the items
-        print("Items")
-        checkchild(root, NS_METAINFO + 'item', node.prettypath)
-        for i in root.findall(NS_METAINFO + 'item'):
-            self._meta.append(MetaInfo.load(node, i))
+        sections = config.sections()
+        for name in sections:
+            if name == "fcman:fcmeta":
+                continue
 
+            meta = MetaInfo.load(node, name, dict(config.items(name)))
+            self._allmeta.append(meta)
 
-#    def check(self, a, b):
-#        node = self._rootdir
-#        self.loadmeta()
-#        self._check(node)
+    def applymeta(self):
+        """ Walk over all loaded meta information and match the globs
+            to the nodes. """
 
-#    def _check(self, node):
-#        for i in sorted(node._children):
-#            child = node._children[i]
-#            print(child.prettypath)
-#            if isinstance(child, Directory):
-#                self._check(child)
-            
+        status = True
+
+        for meta in self._allmeta:
+            node = meta._node
+            pattern = meta.pattern
+            parent = node._parent
+
+            if pattern == ".":
+                parent._meta.append(meta)
+                meta._users.append(parent)
+                continue
+
+            if pattern[0:2] == "r:":
+                pattern = pattern[2:].replace("(@)", "(?P<version>[0-9\.]+)")
+                regex = re.compile(pattern)
+                def matchfn(name):
+                    result = regex.match(name)
+                    if result:
+                        try:
+                            version = result.group("version")
+                        except IndexError:
+                            version = None
+                        return (True, version)
+                    else:
+                        return (False, None)
+            else:
+                def matchfn(name):
+                    return (fnmatch.fnmatchcase(name, pattern), None)
+
+            for name in sorted(parent._children):
+                (matched, version) = matchfn(name)
+                if matched:
+                    child = parent._children[name]
+                    meta._users.append(child)
+
+                    newmeta = meta.clone()
+                    child._meta.append(newmeta)
+
+                    if meta.autoname:
+                        for autoname in meta.autoname:
+                            newmeta.provides.append((autoname, version))
 
 
 class MetaInfo(object):
@@ -503,56 +517,77 @@ class MetaInfo(object):
 
 
     @classmethod
-    def load(cls, node, xml):
+    def load(cls, node, pattern, config):
 
         meta = MetaInfo(node)
 
-        checkchild(xml, [NS_METAINFO + i for i in ('glob', 'package', 'depends', 'description', 'todo')], node.prettypath)
-        checkattr(xml, 'name', node.prettypath)
+        # pattern
+        meta.pattern = pattern
+        meta.autoname = []
+        if "autoname" in config:
+            meta.autoname = config["autoname"].translate(None, " \t\r\n").split(",")
 
-        meta.name = xml.get("name", "")
+        # provides
+        meta.provides = []
+        if "provides" in config:
+            provides = config["provides"].translate(None, " \t\r\n").split(",")
+            for i in provides:
+                parts = i.split(":")
+                meta.provides.append((
+                    parts[0],
+                    parts[1] if len(parts) > 1 and len(parts[1]) else None
+                ))
 
-        # Globs
-        meta._globs = []
-        for c in xml.findall(NS_METAINFO + "glob"):
-            checkattr(c, ("path", "autoname", "autoversion"), node.prettypath)
+        # depends
+        meta.depends = []
+        if "depends" in config:
+            depends = config["depends"].translate(None, " \t\r\n").split(",")
+            for i in depends:
+                parts = i.split(":")
+                meta.depends.append((
+                    parts[0],
+                    parts[1] if len(parts) > 1 and len(parts[1]) else None,
+                    parts[2] if len(parts) > 2 and len(parts[2]) else None
+                ))
+        # tags
+        meta.tags = []
+        if "tags" in config:
+            meta.tags = config["tags"].translate(None, " \t\r\n").split(",")
 
-            glob = c.get("path")
-            autoname = c.get("autoname", None)
-            autoversion = c.get("autoversion", None)
-
-            if autoname:
-                autoname = autoname.split(":")
-
-            meta._globs.append( (glob, autoname, autoversion) )
-
-        # Packages
-        meta._packages = []
-        for p in xml.findall(NS_METAINFO + "package"):
-            checkattr(p, ("name", "version"), node.prettypath)
-            name = p.get("name", "").split(":")
-            version = p.get("version")
-            for part in name:
-                meta._packages.append((part, version))
-
-        # Depends
-        meta._depends = []
-        for d in xml.findall(NS_METAINFO + "depends"):
-            checkattr(d, ("name", "min", "max"), node.prettypath)
-            name = d.get("name").split(":")
-            minver = d.get("min")
-            maxver = d.get("max")
-            for part in name:
-                meta._depends.append((part, minver, maxver))
-
-        # Descriptions
-
-        meta._description = xml.get("description")
-        meta._todo = xml.get("todo")
-
+        # description
+        meta.description = None
+        if "description" in config:
+            desc = config["description"].strip()
+            desc = " ".join([line.strip() for line in desc.splitlines() if len(line)])
+            meta.description = desc
 
 
         return meta
+    
+    def clone(self):
+        """ Make a copy of the meta but with no users. """
+        m = MetaInfo(self._node)
+        m.pattern = self.pattern
+        m.autoname = list(self.autoname)
+        m.provides = list(self.provides)
+        m.depends = list(self.depends)
+        m.tags = list(self.tags)
+        m.description = self.description
+
+        return m
+
+
+    def dump(self):
+        print(self.pattern)
+        for i in self.autoname:
+            print(i)
+        for i in self.provides:
+            print(i)
+        for i in self.depends:
+            print(i)
+        for i in self.tags:
+            print(i)
+        print(self.description)
 
 # Actions
 ################################################################################
@@ -589,20 +624,23 @@ class Action(object):
 
 
 class CreateAction(Action):
+
+    ACTION_NAME="create"
+    ACTION_DESC="Create a collection"
     
     def run(self):
-        coll = Collection(self._root)
+        coll = Collection(self._root, self._writer, self._verbose)
         coll.save()
         return True
 
 class CheckAction(Action):
     """ Check the collection. """
 
-    ACTION_NAME = "check"
-    ACTION_DESC = "Perform quick collection check"
+    ACTION_NAME="check"
+    ACTION_DESC="Perform quick collection check"
 
     def run(self):
-        coll = Collection.load(self._root)
+        coll = Collection.load(self._root, self._writer, self._verbose)
         self._fullcheck = False
         return self.handle_directory(coll._rootdir)
 
@@ -707,7 +745,7 @@ class VerifyAction(CheckAction):
     ACTION_DESC="Perform full checksum verification"
 
     def run(self):
-        coll = Collection.load(self._root)
+        coll = Collection.load(self._root, self._writer, self._verbose)
         self._fullcheck = True
         return self.handle_directory(coll._rootdir)
 
@@ -719,7 +757,7 @@ class UpdateAction(Action):
     ACTION_DESC="Update the collection"
 
     def run(self):
-        coll = Collection.load(self._root)
+        coll = Collection.load(self._root, self._writer, self._verbose)
         self.handle_directory(coll._rootdir)
         coll.save()
         return True
@@ -782,6 +820,108 @@ class UpdateAction(Action):
                 self.handle_directory(child)
             else:
                 pass
+
+
+class DumpAction(Action):
+    """ Dump information about the collection. """
+
+    ACTION_NAME="dump"
+    ACTION_DESC="Dump information"
+
+    def run(self):
+        coll = Collection.load(self._root, self._writer, self._verbose)
+        coll.loadmeta()
+        coll.applymeta()
+
+        self._handle_directory(coll._rootdir)
+
+    def _handle_directory(self, node):
+        print("Directory: {0}".format(node.prettypath))
+
+        if node._meta:
+            self._dumpmeta(node)
+
+        for child in sorted(node._children):
+            print("")
+            childnode = node._children[child]
+            if isinstance(childnode, Symlink):
+                self._handle_symlink(childnode)
+            elif isinstance(childnode, File):
+                self._handle_file(childnode)
+            elif isinstance(childnode, Directory):
+                self._handle_directory(childnode)
+            else:
+                pass
+
+    def _handle_symlink(self, node):
+        print("Symlink: {0}".format(node.prettypath))
+        print("Target: {0}".format(node._target))
+
+        if node._meta:
+            self._dumpmeta(node)
+
+    def _handle_file(self, node):
+        print("File: {0}".format(node.prettypath))
+        print("Size: {0}".format(node._size))
+        print("MD5: {0}".format(node._checksum))
+        print("Modified: {0}".format(node._timestamp))
+
+        if node._meta:
+            self._dumpmeta(node)
+
+    def _dumpmeta(self, node):
+        provides = [provided for meta in node._meta for provided in meta.provides]
+        if provides:
+            print("Provides: {0}".format(
+                ", ".join(
+                    "{0}{1}".format(
+                        name,
+                        ":" + version if version is not None else ""
+                    )
+                    for (name, version) in provides
+                )
+            ))
+
+        depends = [depended for meta in node._meta for depended in meta.depends]
+        if depends:
+            print("Depends: {0}".format(
+                ", ".join(
+                    "{0}{1}{2}".format(
+                        name,
+                        ":" + minver if minver is not None else ":" if maxver is not None else "",
+                        ":" + maxver if maxver is not None else ""
+                    )
+                    for (name, minver, maxver) in depends
+                )
+            ))
+
+        tags = set(tag for meta in node._meta for tag in meta.tags)
+        if tags:
+            print("Tags: {0}".format(
+                ", ".join(sorted(tags))
+            ))
+
+        descriptions = "\n".join(meta.description for meta in node._meta if meta.description)
+        if descriptions:
+            import textwrap
+            lines = textwrap.wrap(descriptions, 75) 
+            print("Description:\n  {0}".format(
+                "\n  ".join(lines)
+            ))
+
+
+class CheckMetaAction(Action):
+    """ Check the metadata (dependencies/etc). """
+
+    ACTION_NAME="checkmeta"
+    ACTION_DESC="Check metadata, dependencies, etc"
+
+    def run(self):
+        coll = Collection.load(self._root, self._writer, self._verbose)
+        coll.loadmeta()
+        coll.applymeta()
+        return True
+
 
 # Program entry point
 ################################################################################
