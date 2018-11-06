@@ -42,6 +42,19 @@ except ImportError:
     except ImportError:
         from xml.etree import ElementTree as ET
 
+# {{{1 Compatibility stuff
+
+# TODO: need better unicode handling so all loaded strings are in unicode
+# (alternative, just make this python3 only, still will need some work)
+try:
+    u = unicode
+except NameError:
+    def u(s):
+        if isinstance(s, bytes):
+            return str(s.decode())
+        else:
+            return str(s)
+
 
 # {{{1 Utility functions and stuff
 ################################################################################
@@ -102,11 +115,11 @@ class StreamWriter(object):
         def __exit__(self, type, value, traceback):
             self._writer.dedent()
 
-    def __init__(self, stream, filename=None):
+    def __init__(self, stream, filename=None, indent="    "):
         """ Initialze the writer. """
         self._stream = stream
         self._indent = 0
-        self._indentText = "    "
+        self._indentText = indent
 
     def indent(self):
         self._indent += 1
@@ -123,9 +136,9 @@ class StreamWriter(object):
         self._stream = None
 
     def writeln(self, line):
-        self._stream.write(self._indent * self._indentText)
-        self._stream.write(line)
-        self._stream.write("\n")
+        self._stream.write(u(self._indent * self._indentText))
+        self._stream.write(u(line))
+        self._stream.write(u("\n"))
 
 class LogWriter(StreamWriter):
 
@@ -363,7 +376,8 @@ class Collection(object):
         self._allmeta = []
         self._filename = os.path.join(root, '_collection', 'collection.xml')
         self._fallbackname = os.path.join(root, 'collection.xml')
-        self._backup = os.path.join(root, '_collection', 'backups', 'collection.xml.' + time.strftime("%Y%m%d%H%M%S"))
+        self._backupname = os.path.join(root, '_collection', 'backups', 'collection.xml.' + time.strftime("%Y%m%d%H%M%S"))
+        self._exportdir = os.path.join(root, '_collection', 'export')
 
     @classmethod
     def load(cls, root, writer, verbose):
@@ -391,21 +405,21 @@ class Collection(object):
 
         tree = ET.ElementTree(root)
 
-        for i in (os.path.dirname(j) for j in (self._backup, self._filename)):
+        for i in (os.path.dirname(j) for j in (self._backupname, self._filename)):
             if not os.path.isdir(i):
                 os.makedirs(i)
 
         # Move old filename over
         if os.path.exists(self._fallbackname):
-            if os.path.exists(self._backup):
-                os.unlink(self._backup)
-            os.rename(self._fallbackname, self._backup)
+            if os.path.exists(self._backupname):
+                os.unlink(self._backupname)
+            os.rename(self._fallbackname, self._backupname)
 
         # Move new filename over
         if os.path.exists(self._filename):
-            if os.path.exists(self._backup):
-                os.unlink(self._backup)
-            os.rename(self._filename, self._backup)
+            if os.path.exists(self._backupname):
+                os.unlink(self._backupname)
+            os.rename(self._filename, self._backupname)
 
         # We don't need to use codecs here as ElementTree actually does the
         # encoding based on the enconding= parameter, unlike xml.dom.minidom
@@ -521,16 +535,19 @@ class MetaInfo(object):
 
         meta = MetaInfo(node)
 
+        def stripchars(s):
+            return ''.join(filter(lambda ch: ch not in " \t\r\n", s))
+
         # pattern
         meta.pattern = pattern
         meta.autoname = []
         if "autoname" in config:
-            meta.autoname = config["autoname"].translate(None, " \t\r\n").split(",")
+            meta.autoname = stripchars(config["autoname"]).split(",")
 
         # provides
         meta.provides = []
         if "provides" in config:
-            provides = config["provides"].translate(None, " \t\r\n").split(",")
+            provides = stripchars(config["provides"]).split(",")
             for i in provides:
                 parts = i.split(":")
                 meta.provides.append((
@@ -541,7 +558,7 @@ class MetaInfo(object):
         # depends
         meta.depends = []
         if "depends" in config:
-            depends = config["depends"].translate(None, " \t\r\n").split(",")
+            depends = stripchars(config["depends"]).split(",")
             for i in depends:
                 parts = i.split(":")
                 meta.depends.append((
@@ -552,7 +569,7 @@ class MetaInfo(object):
         # tags
         meta.tags = []
         if "tags" in config:
-            meta.tags = config["tags"].translate(None, " \t\r\n").split(",")
+            meta.tags = stripchars(config["tags"]).split(",")
 
         # description
         meta.description = None
@@ -822,57 +839,72 @@ class UpdateAction(Action):
                 pass
 
 
-class DumpAction(Action):
+class ExportAction(Action):
     """ Dump information about the collection. """
 
-    ACTION_NAME="dump"
-    ACTION_DESC="Dump information"
+    ACTION_NAME="export"
+    ACTION_DESC="Export information"
 
     def run(self):
         coll = Collection.load(self._root, self._writer, self._verbose)
         coll.loadmeta()
         coll.applymeta()
 
-        self._handle_directory(coll._rootdir)
+        md5file = os.path.join(coll._exportdir, "md5sums.txt")
+        infofile = os.path.join(coll._exportdir, "info.txt")
 
-    def _handle_directory(self, node):
-        print("Directory: {0}".format(node.prettypath))
+        md5stream = self._writer.open(md5file)
+        infostream = self._writer.open(infofile)
+
+        streams = (md5stream, infostream)
+
+        with md5stream:
+            with infostream:
+                self._handle_directory(coll._rootdir, streams)
+
+    def _handle_directory(self, node, streams):
+        streams[1].writeln("Directory: {0}".format(node.prettypath))
 
         if node._meta:
-            self._dumpmeta(node)
+            self._dumpmeta(node, streams)
 
         for child in sorted(node._children):
-            print("")
+            streams[1].writeln("")
             childnode = node._children[child]
             if isinstance(childnode, Symlink):
-                self._handle_symlink(childnode)
+                self._handle_symlink(childnode, streams)
             elif isinstance(childnode, File):
-                self._handle_file(childnode)
+                self._handle_file(childnode, streams)
             elif isinstance(childnode, Directory):
-                self._handle_directory(childnode)
+                self._handle_directory(childnode, streams)
             else:
                 pass
 
-    def _handle_symlink(self, node):
-        print("Symlink: {0}".format(node.prettypath))
-        print("Target: {0}".format(node._target))
+    def _handle_symlink(self, node, streams):
+        streams[1].writeln("Symlink: {0}".format(node.prettypath))
+        streams[1].writeln("Target: {0}".format(node._target))
 
         if node._meta:
-            self._dumpmeta(node)
+            self._dumpmeta(node, streams)
 
-    def _handle_file(self, node):
-        print("File: {0}".format(node.prettypath))
-        print("Size: {0}".format(node._size))
-        print("MD5: {0}".format(node._checksum))
-        print("Modified: {0}".format(node._timestamp))
+    def _handle_file(self, node, streams):
+        streams[1].writeln("File: {0}".format(node.prettypath))
+        streams[1].writeln("Size: {0}".format(node._size))
+        streams[1].writeln("MD5: {0}".format(node._checksum))
+        streams[1].writeln("Modified: {0}".format(node._timestamp))
+
+        if node._checksum:
+            streams[0].writeln(node._checksum + ' *' + node.prettypath[2:])
+        else:
+            self._writer.stdout.status(node.prettypath, "MISSING CHECKSUM")
 
         if node._meta:
-            self._dumpmeta(node)
+            self._dumpmeta(node, streams)
 
-    def _dumpmeta(self, node):
+    def _dumpmeta(self, node, streams):
         provides = [provided for meta in node._meta for provided in meta.provides]
         if provides:
-            print("Provides: {0}".format(
+            streams[1].writeln("Provides: {0}".format(
                 ", ".join(
                     "{0}{1}".format(
                         name,
@@ -884,7 +916,7 @@ class DumpAction(Action):
 
         depends = [depended for meta in node._meta for depended in meta.depends]
         if depends:
-            print("Depends: {0}".format(
+            streams[1].writeln("Depends: {0}".format(
                 ", ".join(
                     "{0}{1}{2}".format(
                         name,
@@ -897,7 +929,7 @@ class DumpAction(Action):
 
         tags = set(tag for meta in node._meta for tag in meta.tags)
         if tags:
-            print("Tags: {0}".format(
+            streams[1].writeln("Tags: {0}".format(
                 ", ".join(sorted(tags))
             ))
 
@@ -905,7 +937,7 @@ class DumpAction(Action):
         if descriptions:
             import textwrap
             lines = textwrap.wrap(descriptions, 75) 
-            print("Description:\n  {0}".format(
+            streams[1].writeln("Description:\n  {0}".format(
                 "\n  ".join(lines)
             ))
 
@@ -920,7 +952,105 @@ class CheckMetaAction(Action):
         coll = Collection.load(self._root, self._writer, self._verbose)
         coll.loadmeta()
         coll.applymeta()
-        return True
+
+        status = True
+        if not self._checkdeps(coll):
+            status = False
+
+        if not self._checkmeta_used(coll):
+            status = False
+
+        return status
+
+    def _checkdeps(self, coll):
+        """ Check the dependencies. """
+
+        # First gather all known packages that are actaully attached to a node
+        packages = {}
+        self._checkdeps_walk_collect(coll._rootdir, packages)
+
+        # Next check all dependencies from the nodes have a package to satisfy
+        return self._checkdeps_walk(coll._rootdir, packages)
+
+    def _checkdeps_walk_collect(self, node, packages):
+        for meta in node._meta:
+            for (name, version) in meta.provides:
+                if not name in packages:
+                    packages[name] = set()
+                packages[name].add(version)
+
+        if isinstance(node, Directory):
+            for child in sorted(node._children):
+                self._checkdeps_walk_collect(node._children[child], packages)
+                
+    def _checkdeps_walk(self, node, packages):
+        status = True
+
+        if node._meta:
+            for meta in node._meta:
+                for depends in meta.depends:
+                    if not self._checkdeps_find(depends, packages):
+                        status = False
+                        self._writer.stdout.status(node.prettypath, "DEPENDS", str(depends))
+
+        if isinstance(node, Directory):
+            for child in sorted(node._children):
+                if not self._checkdeps_walk(node._children[child], packages):
+                    status = False
+
+        return status
+
+    def _checkdeps_find(self, depends, packages):
+        (name, minver, maxver) = depends
+
+        # Check package exists
+        if not name in packages:
+            return False
+
+        # If no version in dependency, package exists so it is satisfied
+        if minver is None and maxver is None:
+            return True
+
+        for version in packages[name]:
+            if version is None:
+                continue # Can't compare to a package without a version
+
+            if minver is not None and self._checkdeps_compare(version, minver) < 0:
+                continue
+
+            if maxver is not None and self._checkdeps_compare(version, maxver) > 0:
+                continue
+
+            # Found a version that is within the range
+            return True
+
+    def _checkdeps_compare(self, v1, v2):
+        """ A simple version compare based only on numbers and periods. """
+
+        try:
+            v1 = map(lambda v: int(v), v1.split("."))
+            v2 = map(lambda v: int(v), v2.split("."))
+        except ValueError:
+            return False
+
+        # pad to the same length
+        if len(v1) < len(v2):
+            v1.extend([0] * (len(v2) - len(v1)))
+        elif len(v2) < len(v1):
+            v2.extend([0] * (len(v1) - len(v2)))
+
+        # per element compare
+        if v1 < v2:
+            return -1
+        elif v1 > v2:
+            return 1
+        else:
+            return 0
+
+    def _checkmeta_used(self, coll):
+        for meta in coll._allmeta:
+            if not meta._users:
+                self._writer.stdout.status(meta._node.prettypath, "UNUSEDMETA", meta.pattern)
 
 
 # Program entry point
