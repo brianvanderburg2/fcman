@@ -548,19 +548,20 @@ class MetaInfo(object):
 
         meta = MetaInfo(node)
 
-        def stripchars(s):
-            return ''.join(filter(lambda ch: ch not in " \t\r\n", s))
+        def splitval(s):
+            s = ''.join(map(lambda ch: ',' if ch in " \t\r\n" else ch, s))
+            return list(filter(lambda i: len(i) > 0, s.split(',')))
 
         # pattern
         meta.pattern = pattern
         meta.autoname = []
         if "autoname" in config:
-            meta.autoname = stripchars(config["autoname"]).split(",")
+            meta.autoname = splitval(config["autoname"])
 
         # provides
         meta.provides = []
         if "provides" in config:
-            provides = stripchars(config["provides"]).split(",")
+            provides = splitval(config["provides"])
             for i in provides:
                 parts = i.split(":")
                 meta.provides.append((
@@ -571,7 +572,7 @@ class MetaInfo(object):
         # depends
         meta.depends = []
         if "depends" in config:
-            depends = stripchars(config["depends"]).split(",")
+            depends = splitval(config["depends"])
             for i in depends:
                 parts = i.split(":")
                 meta.depends.append((
@@ -582,7 +583,7 @@ class MetaInfo(object):
         # tags
         meta.tags = []
         if "tags" in config:
-            meta.tags = stripchars(config["tags"]).split(",")
+            meta.tags = splitval(config["tags"])
 
         # description
         meta.description = None
