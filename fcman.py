@@ -44,7 +44,9 @@ import time
 
 try:
     from lxml import etree as ET
+    PRETTY_PRINT = True
 except ImportError:
+    PRETTY_PRINT = False
     try:
         from xml.etree import cElementTree as ET
     except ImportError:
@@ -431,8 +433,13 @@ class Collection(object):
 
         # We don't need to use codecs here as ElementTree actually does the
         # encoding based on the enconding= parameter, unlike xml.dom.minidom
+        if PRETTY_PRINT:
+            kwargs = {"pretty_print": True}
+        else:
+            kwargs = {}
+
         tree.write(self._filename, encoding='utf-8', xml_declaration=True,
-                   method='xml', pretty_print=True)
+                   method='xml', **kwargs)
 
 
     def loadmeta(self):
