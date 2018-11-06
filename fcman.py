@@ -495,15 +495,13 @@ class Collection(object):
         """ Walk over all loaded meta information and match the globs
             to the nodes. """
 
-        status = True
-
         for meta in self._allmeta:
             node = meta._node
             pattern = meta.pattern
             parent = node._parent
 
             if pattern == ".":
-                parent._meta.append(meta)
+                parent._meta.append(meta.clone())
                 meta._users.append(parent)
                 continue
 
