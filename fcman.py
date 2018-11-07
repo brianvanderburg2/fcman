@@ -1,21 +1,18 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # vim: foldmethod=marker foldmarker={{{,}}}, foldlevel=0
+""" File collection management utility. """
 
-# TODO:
+# Create upgrade action to convert from collection in root to subdir
+# Switch to Python 3 only (Solve various problems trying to handle both)
 # Error messages should only go to stderr
 # Informational messages should only be printed to stdout if verbose
 # Status messages for actions and outputs should be printed to stdout
 # stderror should be though of as program error:
     # If we can't load the xml files or badly formatted, that is program error (go to stderr)
-    # If a file is missing during a check, that is utility error (go to stdout)
-# All string constants should be unicode
-# When reading from text files convert to unicode (read file as UTF-8)
-    # ini parser use readfp/readfile with codecs.open
-    # Ensure lxml reads in unicode
-# when reading file system (listdir), return unicode names
-# when checking file system, convert unicode to file system encoding
-# when writing to files, convert unicode to utf-8
-# when writing to stdout/stderr, convert unicode to correct encoding
+# If a file is missing during a check, that is utility error (go to stdout)
+# All in-memory strings should be unicode (may need to check when parsing xml)
+# Text files should be UTF-8 encoded
+
 
 # {{{1 Meta information
 
@@ -28,13 +25,8 @@ __version__ = "0.2.20181105.1"
 # {{{1 Imports and such
 
 import argparse
-import codecs
-try:
-    from configparser import SafeConfigParser
-except ImportError:
-    from ConfigParser import SafeConfigParser
+from configparser import SafeConfigParser
 import fnmatch
-import glob
 import hashlib
 import io
 import os
@@ -52,43 +44,26 @@ except ImportError:
     except ImportError:
         from xml.etree import ElementTree as ET
 
-# {{{1 Compatibility stuff
+# {{{1 Checks
 
-# TODO: need better unicode handling so all loaded strings are in unicode
-# (alternative, just make this python3 only, still will need some work)
-try:
-    u = unicode
-except NameError:
-    def u(s):
-        if isinstance(s, bytes):
-            return str(s.decode())
-        else:
-            return str(s)
-
+if sys.version_info[0:2] < (3, 2):
+    sys.exit("This program requires Python 3.2 or greater")
 
 # {{{1 Utility functions and stuff
 ################################################################################
 
-# Global values
+# Time difference to consider a file's timestamp changed
 TIMEDIFF = 2
 
 # Use namespaces
 NS_COLLECTION = "{urn:mrbavii.fcman:collection}"
-
 ET.register_namespace('c', NS_COLLECTION[1:-1])
 
-def listdir(path):
-    """ List a directory, make sure returned names are unicode by passing a unicode path. """
-    # This was needed as was causing errors in some cases when joining names
-    if isinstance(path, bytes):
-        path = path.decode(sys.getfilesystemencoding())
-    return os.listdir(path)
-
-_case_sensitive = ('abcDEF' == os.path.normcase('abcDEF'))
-def realname(path):
-    """ Return true if the name is the real name, else return false. """
+def realname(path, _case_sensitive=('abcDEF' == os.path.normcase('abcDEF'))):
+    """ Return true if the name presented is the same as the OS. """
     # A real name means the OS represents the filename in the same case
-    # as stored in the file.  
+    # as stored in the collection.  This is only relavent if the OS uses
+    # case insensitive filenames
 
     if _case_sensitive:
         return True
@@ -98,7 +73,7 @@ def realname(path):
     dir = os.path.dirname(path)
     name = os.path.basename(path)
 
-    return name in listdir(dir)
+    return name in os.listdir(dir)
 
 def checksum(path):
     """ Calculate the checksum and return the result. """
@@ -116,6 +91,8 @@ class StreamWriter(object):
     """ Write to a given stream. """
 
     class _indent_ctx_mgr(object):
+        """ Provide a context manager for the indentation of a stream. """
+
         def __init__(self, writer):
             self._writer = writer
 
@@ -132,10 +109,12 @@ class StreamWriter(object):
         self._indentText = indent
 
     def indent(self):
+        """ Increase the indent. """
         self._indent += 1
         return self._indent_ctx_mgr(self)
 
     def dedent(self):
+        """ Decrease the indent. """
         self._indent -= 1
 
     def __enter__(self):
@@ -146,17 +125,24 @@ class StreamWriter(object):
         self._stream = None
 
     def writeln(self, line):
-        self._stream.write(u(self._indent * self._indentText))
-        self._stream.write(u(line))
-        self._stream.write(u("\n"))
+        """ Write a line of text to the stream. """
+        self._stream.write(self._indent * self._indentText)
+        self._stream.write(line)
+        self._stream.write("\n")
 
 class LogWriter(StreamWriter):
+    """ A stream writer with status methods. """
 
     def __init__(self, *args, **kwargs):
+        """ Initialize the writer. """
         StreamWriter.__init__(self, *args, **kwargs)
         self._last = None
 
     def status(self, path, status, msg=None):
+        """ Show the status with optional message.
+            If the same path/status is used consecutively, only the message
+            will be shown after the first status until the path/status changes
+        """
         check = (path, status)
         if check != self._last:
             self._last = check
@@ -166,36 +152,22 @@ class LogWriter(StreamWriter):
             with self.indent():
                 self.writeln("> " + msg)
 
+class TextFile(StreamWriter):
+    """ A text file based on StreamWriter. """
+
+    def __init__(self, filename):
+        """ Initialize the text file. """
+        stream = io.open(filename, "wt", encoding="utf-8", newline="\n")
+        StreamWriter.__init__(self, stream, filename)
+
+
 class Writer(object):
     """ This class will replace logger and provide some better. """
 
     def __init__(self, redirect=None):
-
-        # Perform proper encoding for the output.
-        # On Python 2, stdout/stderr are 8 bit interfaces.  On Python3
-        # they expect unicode data and will convert, and can also take binary
-        # data.  So we really only need to handle converting on Python 2
-        if sys.version[0] == '2':
-            enc = sys.stdout.encoding
-            if enc is None:
-                enc = 'utf8'
-            stdout = codecs.getwriter(enc)(sys.stdout)
-
-            enc = sys.stderr.encoding
-            if enc is None:
-                enc = 'utf8'
-            stderr = codecs.getwriter(enc)(sys.stderr)
-        else:
-            stdout = sys.stdout
-            stderr = sys.stderr
-
-        self.stdout = LogWriter(stdout)
-        self.stderr = LogWriter(stderr)
-
-    def open(self, filename):
-        handle = io.open(filename, "wt", encoding="utf-8", newline="\n")
-        return StreamWriter(handle, filename)
-        
+        """ Initialize teh writer. """
+        self.stdout = LogWriter(sys.stdout)
+        self.stderr = LogWriter(sys.stderr)
 
 # {{{1 Collection classes
 ################################################################################
@@ -204,50 +176,49 @@ class Node(object):
     """ A node represents a file, symlink, or directory in the collection. """
 
     def __init__(self, parent, name):
-        """ Initialize the collection with the name, parent, and collection """
-        self._name = name
-        self._parent = parent
-        self._meta = []
-
-        # If this is RootDirectory, self._collection is set it it's __init__
-        # before calling parent __init__, otherwise we set it from parent
+        """ Initialize the node with the parent and name. """
+        self.name = name
+        self.parent = parent
+        self.meta = []
 
         if parent is not None:
-            parent._children[name] = self
-            self._collection = parent._collection
-            self._path = parent._path + (name,)
+            parent.children[name] = self
+            self.collection = parent.collection
+            self.pathlist = parent.pathlist + (name,)
         else:
-            assert(isinstance(self, RootDirectory))
-            self._path = ()
-
-
-    @property
-    def pathlist(self):
-        return self._path
+            assert isinstance(self, RootDirectory)
+            self.pathlist = ()
 
     @property
     def path(self):
+        """ Return the filesystem path of the node. """
         return os.path.join(
-            self._collection._root,
-            *self._path
+            self.collection.root,
+            *self.pathlist
         )
 
     @property
     def prettypath(self):
-        if self._path:
-            return "./" + "/".join(self._path)
+        """ Return the relative path of the node under root. Each segment is
+            separated by a forward slash. """
+        if self.pathlist:
+            return "./" + "/".join(self.pathlist)
         else:
             return "."
 
     # Load and save
     @classmethod
     def load(cls, parent, xml):
+        """ Load information from the XML and create the child node under the
+            parent node. """
         raise NotImplementedError
 
     def save(self, xml):
+        """ Save information to the XML element. """
         raise NotImplementedError
 
     def exists(self):
+        """ Test if the filesystem path exists. """
         raise NotImplementedError
 
 
@@ -255,21 +226,25 @@ class Symlink(Node):
     """ A symbolic link node. """
 
     def __init__(self, parent, name, target):
+        """ Initialize the symlink node. """
         Node.__init__(self, parent, name)
-        self._target = target
+        self.target = target
 
     @classmethod
     def load(cls, parent, xml):
+        """ Load the symlink node from XML. """
         name = xml.get('name')
         target = xml.get('target')
 
         return Symlink(parent, name, target)
 
     def save(self, xml):
-        xml.set('name', self._name)
-        xml.set('target', self._target)
+        """ Save the symlink node to XML. """
+        xml.set('name', self.name)
+        xml.set('target', self.target)
 
     def exists(self):
+        """ Test if the symlink exists. """
         return os.path.islink(self.path) and realname(self.path)
 
 
@@ -277,14 +252,16 @@ class File(Node):
     """ A file node """
 
     def __init__(self, parent, name, size, timestamp, checksum):
+        """ Initialize the file node. """
         Node.__init__(self, parent, name)
 
-        self._size = size
-        self._timestamp = timestamp
-        self._checksum = checksum
+        self.size = size
+        self.timestamp = timestamp
+        self.checksum = checksum
 
     @classmethod
     def load(cls, parent, xml):
+        """ Load the file node from XML. """
         name = xml.get('name')
         size = xml.get('size', -1)
         timestamp = xml.get('timestamp', -1)
@@ -293,12 +270,14 @@ class File(Node):
         return File(parent, name, int(size), int(timestamp), checksum)
 
     def save(self, xml):
-        xml.set('name', self._name)
-        xml.set('size', str(self._size))
-        xml.set('timestamp', str(self._timestamp))
-        xml.set('checksum', self._checksum)
+        """ Save the file node to XML. """
+        xml.set('name', self.name)
+        xml.set('size', str(self.size))
+        xml.set('timestamp', str(self.timestamp))
+        xml.set('checksum', self.checksum)
 
     def exists(self):
+        """ Test if the file exists. """
         return os.path.isfile(self.path) and not os.path.islink(self.path) and realname(self.path)
 
 
@@ -306,11 +285,13 @@ class Directory(Node):
     """ A directory node """
 
     def __init__(self, parent, name):
+        """ Initialize the directory node. """
         Node.__init__(self, parent, name)
-        self._children = {}
+        self.children = {}
 
     @classmethod
     def load(cls, parent, xml):
+        """ Load the directory node from XML. """
         # If parent is a collection object, then we are a RootDirectory
         if isinstance(parent, Collection):
             dir = RootDirectory(parent)
@@ -329,12 +310,13 @@ class Directory(Node):
         return dir
 
     def save(self, xml):
+        """ Save the directory node to XML. """
         if not isinstance(self, RootDirectory):
-            xml.set('name', self._name)
+            xml.set('name', self.name)
 
-        for name in sorted(self._children):
-            child = self._children[name]
-            
+        for name in sorted(self.children):
+            child = self.children[name]
+
             if isinstance(child, Symlink):
                 tag = 'symlink'
             elif isinstance(child, File):
@@ -348,12 +330,14 @@ class Directory(Node):
             child.save(element)
 
     def ignore(self, name):
-        if isinstance(self._parent, RootDirectory) and self._name == "_collection":
+        """ Ignore certain files under the directory. """
+        if self.pathlist == ("_collection",):
             if name.lower() in ("collection.xml", "backups", "export"):
                 return True
         return False
 
     def exists(self):
+        """ Test if the directory exists. """
         return os.path.isdir(self.path) and not os.path.islink(self.path) and realname(self.path)
 
 
@@ -362,15 +346,8 @@ class RootDirectory(Directory):
 
     def __init__(self, collection):
         """ Initialize the root directory. """
-        self._collection = collection
+        self.collection = collection
         Directory.__init__(self, None, None)
-
-    def ignore(self, name):
-        """ Ignore specific files in the root directory. """
-        if name.lower() in ("md5sum",):
-            return True
-
-        return Directory.ignore(self, name)
 
 
 class Collection(object):
@@ -379,51 +356,43 @@ class Collection(object):
     def __init__(self, root, writer, verbose):
         """ Initialize the collection with the root of the collection. """
 
-        self._root = root
-        self._writer = writer
-        self._verbose = verbose
-        self._rootdir = RootDirectory(self)
-        self._allmeta = []
-        self._filename = os.path.join(root, '_collection', 'collection.xml')
-        self._fallbackname = os.path.join(root, 'collection.xml')
-        self._backupname = os.path.join(root, '_collection', 'backups', 'collection.xml.' + time.strftime("%Y%m%d%H%M%S"))
-        self._exportdir = os.path.join(root, '_collection', 'export')
+        self.root = root
+        self.writer = writer
+        self.verbose = verbose
+        self.rootnode = RootDirectory(self)
+        self.allmeta = []
+        self.datadir = os.path.join(root, "_collection")
+        self._filename = os.path.join(self.datadir, 'collection.xml')
+        self._backupname = os.path.join(
+            self.datadir, 'backups', 'collection.xml.' +
+            time.strftime("%Y%m%d%H%M%S")
+        )
 
     @classmethod
     def load(cls, root, writer, verbose):
         """ Function to load a file and return the collection object. """
         coll = Collection(root, writer, verbose)
 
-        if os.path.isfile(coll._filename):
-            filename = coll._filename
-        else:
-            filename = coll._fallbackname
-
-        tree = ET.parse(filename)
+        tree = ET.parse(coll._filename)
         root = tree.getroot()
         if not root.tag in ('collection', NS_COLLECTION + 'collection'):
             return None
 
-        # Load the rootdir
-        coll._rootdir = RootDirectory.load(coll, root)
+        # Load the root node
+        coll.rootnode = RootDirectory.load(coll, root)
 
         return coll
-    
+
     def save(self):
+        """ Save the collection to XML. """
         root = ET.Element(NS_COLLECTION + 'collection')
-        self._rootdir.save(root)
+        self.rootnode.save(root)
 
         tree = ET.ElementTree(root)
 
         for i in (os.path.dirname(j) for j in (self._backupname, self._filename)):
             if not os.path.isdir(i):
                 os.makedirs(i)
-
-        # Move old filename over
-        if os.path.exists(self._fallbackname):
-            if os.path.exists(self._backupname):
-                os.unlink(self._backupname)
-            os.rename(self._fallbackname, self._backupname)
 
         # Move new filename over
         if os.path.exists(self._filename):
@@ -448,7 +417,7 @@ class Collection(object):
         status = True
 
         # First we load all the meta files
-        node = self._rootdir
+        node = self.rootnode
         if not self._loadmeta_walk(node):
             status = False
 
@@ -456,8 +425,8 @@ class Collection(object):
 
     def _loadmeta_walk(self, node):
         status = True
-        for i in sorted(node._children):
-            child = node._children[i]
+        for i in sorted(node.children):
+            child = node.children[i]
 
             if i == "fcmeta.ini":
                 if not self._loadmeta(child):
@@ -469,18 +438,18 @@ class Collection(object):
         return status
 
     def _loadmeta(self, node):
-        if self._verbose:
-            self._writer.stdout.status(node.prettypath, 'LOADING')
+        if self.verbose:
+            self.writer.stdout.status(node.prettypath, 'LOADING')
 
         config = SafeConfigParser()
         read = config.read(node.prettypath)
         if not read:
-            self._writer.stderr.status(node.prettypath, 'LOAD ERROR', str(e))
+            self.writer.stderr.status(node.prettypath, 'LOAD ERROR')
             return False
 
         # Should at least have fcmeta section
         if not config.has_section("fcman:fcmeta"):
-            self._writer.stderr.status(node.prettypath, 'NOTMETAINFO')
+            self.writer.stderr.status(node.prettypath, 'NOTMETAINFO')
             return False
 
         sections = config.sections()
@@ -489,24 +458,24 @@ class Collection(object):
                 continue
 
             meta = MetaInfo.load(node, name, dict(config.items(name)))
-            self._allmeta.append(meta)
+            self.allmeta.append(meta)
 
     def applymeta(self):
         """ Walk over all loaded meta information and match the globs
             to the nodes. """
 
-        for meta in self._allmeta:
-            node = meta._node
+        for meta in self.allmeta:
+            node = meta.node
             pattern = meta.pattern
-            parent = node._parent
+            parent = node.parent
 
             if pattern == ".":
-                parent._meta.append(meta.clone())
-                meta._users.append(parent)
+                parent.meta.append(meta.clone())
+                meta.users.append(parent)
                 continue
 
             if pattern[0:2] == "r:":
-                pattern = pattern[2:].replace("(@)", "(?P<version>[0-9\.]+)")
+                pattern = pattern[2:].replace("(@)", "(?P<version>[0-9\\.]+)")
                 regex = re.compile(pattern)
                 def matchfn(name):
                     result = regex.match(name)
@@ -522,14 +491,14 @@ class Collection(object):
                 def matchfn(name):
                     return (fnmatch.fnmatchcase(name, pattern), None)
 
-            for name in sorted(parent._children):
+            for name in sorted(parent.children):
                 (matched, version) = matchfn(name)
                 if matched:
-                    child = parent._children[name]
-                    meta._users.append(child)
+                    child = parent.children[name]
+                    meta.users.append(child)
 
                     newmeta = meta.clone()
-                    child._meta.append(newmeta)
+                    child.meta.append(newmeta)
 
                     if meta.autoname:
                         for autoname in meta.autoname:
@@ -537,10 +506,16 @@ class Collection(object):
 
 
 class MetaInfo(object):
-    
+
     def __init__(self, node):
-        self._node = node
-        self._users = []
+        self.node = node
+        self.users = []
+        self.pattern = None
+        self.autoname = []
+        self.provides = []
+        self.depends = []
+        self.tags = []
+        self.description = None
 
 
     @classmethod
@@ -554,12 +529,10 @@ class MetaInfo(object):
 
         # pattern
         meta.pattern = pattern
-        meta.autoname = []
         if "autoname" in config:
             meta.autoname = splitval(config["autoname"])
 
         # provides
-        meta.provides = []
         if "provides" in config:
             provides = splitval(config["provides"])
             for i in provides:
@@ -570,7 +543,6 @@ class MetaInfo(object):
                 ))
 
         # depends
-        meta.depends = []
         if "depends" in config:
             depends = splitval(config["depends"])
             for i in depends:
@@ -586,7 +558,6 @@ class MetaInfo(object):
             meta.tags = splitval(config["tags"])
 
         # description
-        meta.description = None
         if "description" in config:
             desc = config["description"].strip()
             desc = " ".join([line.strip() for line in desc.splitlines() if len(line)])
@@ -594,10 +565,10 @@ class MetaInfo(object):
 
 
         return meta
-    
+
     def clone(self):
         """ Make a copy of the meta but with no users. """
-        m = MetaInfo(self._node)
+        m = MetaInfo(self.node)
         m.pattern = self.pattern
         m.autoname = list(self.autoname)
         m.provides = list(self.provides)
@@ -628,12 +599,12 @@ class Action(object):
 
     ACTION_NAME = None
     ACTION_DESC = ""
-    
+
     def __init__(self, root, options, writer, verbose):
-        self._root = root
-        self._options = options
-        self._writer = writer
-        self._verbose = verbose
+        self.root = root
+        self.options = options
+        self.writer = writer
+        self.verbose = verbose
 
     def run(self):
         raise NotImplementedError
@@ -656,37 +627,37 @@ class Action(object):
 
 class CreateAction(Action):
 
-    ACTION_NAME="create"
-    ACTION_DESC="Create a collection"
-    
+    ACTION_NAME = "create"
+    ACTION_DESC = "Create a collection"
+
     def run(self):
-        coll = Collection(self._root, self._writer, self._verbose)
+        coll = Collection(self.root, self.writer, self.verbose)
         coll.save()
         return True
 
 class CheckAction(Action):
     """ Check the collection. """
 
-    ACTION_NAME="check"
-    ACTION_DESC="Perform quick collection check"
+    ACTION_NAME = "check"
+    ACTION_DESC = "Perform quick collection check"
 
     def run(self):
-        coll = Collection.load(self._root, self._writer, self._verbose)
+        coll = Collection.load(self.root, self.writer, self.verbose)
         self._fullcheck = False
-        return self.handle_directory(coll._rootdir)
+        return self.handle_directory(coll.rootnode)
 
     def _missing_dir(self, node):
-        for i in sorted(node._children):
-            newnode = node._children[i]
+        for i in sorted(node.children):
+            newnode = node.children[i]
 
-            self._writer.stdout.status(newnode.prettypath, 'MISSING')
+            self.writer.stdout.status(newnode.prettypath, 'MISSING')
             if isinstance(newnode, Directory):
                 self._missing_dir(newnode)
 
     def handle_symlink(self, node):
         target = os.readlink(node.path)
-        if target != node._target:
-            self._writer.stdout.status(node.prettypath, 'SYMLINK')
+        if target != node.target:
+            self.writer.stdout.status(node.prettypath, 'SYMLINK')
             return False
 
         return True
@@ -695,36 +666,36 @@ class CheckAction(Action):
         status = True
         stat = os.stat(node.path)
 
-        if abs(node._timestamp - stat.st_mtime) > TIMEDIFF:
+        if abs(node.timestamp - stat.st_mtime) > TIMEDIFF:
             status = False
-            self._writer.stdout.status(node.prettypath, 'TIMESTAMP')
+            self.writer.stdout.status(node.prettypath, 'TIMESTAMP')
 
-        if node._size != stat.st_size:
+        if node.size != stat.st_size:
             status = False
-            self._writer.stdout.status(node.prettypath, 'SIZE')
+            self.writer.stdout.status(node.prettypath, 'SIZE')
 
         if self._fullcheck:
-            if self._verbose:
-                self._writer.stdout.status(node.prettypath, 'PROCESSING')
-            if node._checksum != checksum(node.path):
+            if self.verbose:
+                self.writer.stdout.status(node.prettypath, 'PROCESSING')
+            if node.checksum != checksum(node.path):
                 status = False
-                self._writer.stdout.status(node.prettypath, 'CHECKSUM')
+                self.writer.stdout.status(node.prettypath, 'CHECKSUM')
 
         return status
 
     def handle_directory(self, node):
-        if self._verbose:
-            self._writer.stdout.status(node.prettypath, 'PROCESSING')
+        if self.verbose:
+            self.writer.stdout.status(node.prettypath, 'PROCESSING')
         status = True
 
         # Check for missing
-        for i in sorted(node._children):
-            newnode = node._children[i]
+        for i in sorted(node.children):
+            newnode = node.children[i]
 
             if node.ignore(i):
-                self._writer.stdout.status(newnode.prettypath, 'SHOULDIGNORE')
+                self.writer.stdout.status(newnode.prettypath, 'SHOULDIGNORE')
             if not newnode.exists():
-                self._writer.stdout.status(newnode.prettypath , 'MISSING')
+                self.writer.stdout.status(newnode.prettypath, 'MISSING')
                 status = False
 
                 # Report all subitems
@@ -733,26 +704,26 @@ class CheckAction(Action):
 
 
         # Check for new items
-        for i in sorted(listdir(node.path)):
-            if not node.ignore(i) and not i in node._children:
-                self._writer.stdout.status(node.prettypath + "/" + i, 'NEW')
+        for i in sorted(os.listdir(node.path)):
+            if not node.ignore(i) and not i in node.children:
+                self.writer.stdout.status(node.prettypath + "/" + i, 'NEW')
                 status = False
 
                 # Show new child items
                 path = node.path + os.sep + i
                 if os.path.isdir(path) and not os.path.islink(path):
                     newnode = Directory(node, i)
-                    
+
                     orig = self._fullcheck
                     self._fullcheck = False
                     self.handle_directory(newnode)
                     self._fullcheck = orig
 
-                    del node._children[i]
+                    del node.children[i]
 
         # Check children
-        for i in sorted(node._children):
-            child = node._children[i]
+        for i in sorted(node.children):
+            child = node.children[i]
             if child.exists():
                 if isinstance(child, Symlink):
                     if not self.handle_symlink(child):
@@ -772,61 +743,61 @@ class CheckAction(Action):
 class VerifyAction(CheckAction):
     """ Verify the collection. """
 
-    ACTION_NAME="verify"
-    ACTION_DESC="Perform full checksum verification"
+    ACTION_NAME = "verify"
+    ACTION_DESC = "Perform full checksum verification"
 
     def run(self):
-        coll = Collection.load(self._root, self._writer, self._verbose)
+        coll = Collection.load(self.root, self.writer, self.verbose)
         self._fullcheck = True
-        return self.handle_directory(coll._rootdir)
+        return self.handle_directory(coll.rootnode)
 
 
 class UpdateAction(Action):
     """ Update the collection. """
 
-    ACTION_NAME="update"
-    ACTION_DESC="Update the collection"
+    ACTION_NAME = "update"
+    ACTION_DESC = "Update the collection"
 
     def run(self):
-        coll = Collection.load(self._root, self._writer, self._verbose)
-        self.handle_directory(coll._rootdir)
+        coll = Collection.load(self.root, self.writer, self.verbose)
+        self.handle_directory(coll.rootnode)
         coll.save()
         return True
 
     def handle_symlink(self, node):
         target = os.readlink(node.path)
-        if target != node._target:
-            node._target = target
-            self._writer.stdout.status(node.prettypath, "SYMLINK")
+        if target != node.target:
+            node.target = target
+            self.writer.stdout.status(node.prettypath, "SYMLINK")
 
     def handle_file(self, node):
         stat = os.stat(node.path)
 
-        if abs(node._timestamp - stat.st_mtime) > TIMEDIFF or node._size != stat.st_size or node._checksum == "":
-            if self._verbose:
-                self._writer.stdout.status(node.prettypath, 'PROCESSING')
-            node._checksum = checksum(node.path)
-            node._timestamp = int(stat.st_mtime)
-            node._size = stat.st_size
-            self._writer.stdout.status(node.prettypath, 'CHECKSUM')
+        if abs(node.timestamp - stat.st_mtime) > TIMEDIFF or node.size != stat.st_size or node.checksum == "":
+            if self.verbose:
+                self.writer.stdout.status(node.prettypath, 'PROCESSING')
+            node.checksum = checksum(node.path)
+            node.timestamp = int(stat.st_mtime)
+            node.size = stat.st_size
+            self.writer.stdout.status(node.prettypath, 'CHECKSUM')
 
     def handle_directory(self, node):
-        if self._verbose:
-            self._writer.stdout.status(node.prettypath, 'PROCESSING')
+        if self.verbose:
+            self.writer.stdout.status(node.prettypath, 'PROCESSING')
 
         # Check for missing items
-        for i in sorted(node._children):
-            child = node._children[i]
+        for i in sorted(node.children):
+            child = node.children[i]
             if node.ignore(i):
-                del node._children[i]
-                self._writer.stdout.status(child.prettypath, 'IGNORED')
+                del node.children[i]
+                self.writer.stdout.status(child.prettypath, 'IGNORED')
             elif not child.exists():
-                del node._children[i]
-                self._writer.stdout.status(child.prettypath, 'DELETED')
+                del node.children[i]
+                self.writer.stdout.status(child.prettypath, 'DELETED')
 
         # Add new items
-        for i in sorted(listdir(node.path)):
-            if not node.ignore(i) and not i in node._children:
+        for i in sorted(os.listdir(node.path)):
+            if not node.ignore(i) and not i in node.children:
                 path = node.path + os.sep + i
 
                 if os.path.islink(path):
@@ -838,11 +809,11 @@ class UpdateAction(Action):
                 else:
                     continue # Unsupported item type, will be reported missing with check
 
-                self._writer.stdout.status(item.prettypath, 'ADDED')
+                self.writer.stdout.status(item.prettypath, 'ADDED')
 
         # Update all item including newly added items
-        for i in sorted(node._children):
-            child = node._children[i]
+        for i in sorted(node.children):
+            child = node.children[i]
             if isinstance(child, Symlink):
                 self.handle_symlink(child)
             elif isinstance(child, File):
@@ -856,39 +827,42 @@ class UpdateAction(Action):
 class ExportAction(Action):
     """ Dump information about the collection. """
 
-    ACTION_NAME="export"
-    ACTION_DESC="Export information"
+    ACTION_NAME = "export"
+    ACTION_DESC = "Export information"
 
     def run(self):
-        coll = Collection.load(self._root, self._writer, self._verbose)
+        coll = Collection.load(self.root, self.writer, self.verbose)
         coll.loadmeta()
         coll.applymeta()
 
-        if not os.path.isdir(coll._exportdir):
-            os.makedirs(coll._exportdir)
+        exportdir = os.path.join(coll.datadir, "export")
+        if not os.path.isdir(exportdir):
+            os.makedirs(exportdir)
 
-        md5file = os.path.join(coll._exportdir, "md5sums.txt")
-        infofile = os.path.join(coll._exportdir, "info.txt")
+        md5file = os.path.join(exportdir, "md5sums.txt")
+        infofile = os.path.join(exportdir, "info.txt")
 
-        md5stream = self._writer.open(md5file)
-        infostream = self._writer.open(infofile)
-
+        md5stream = TextFile(md5file)
+        infostream = TextFile(infofile)
 
         streams = (md5stream, infostream)
 
         with md5stream:
             with infostream:
-                self._handle_directory(coll._rootdir, streams)
+                self._handle_directory(coll.rootnode, streams)
 
     def _handle_directory(self, node, streams):
+        if self.verbose:
+            self.writer.stdout.status(node.prettypath, 'PROCESSING')
+        
         streams[1].writeln("Directory: {0}".format(node.prettypath))
 
-        if node._meta:
+        if node.meta:
             self._dumpmeta(node, streams)
 
-        for child in sorted(node._children):
+        for child in sorted(node.children):
             streams[1].writeln("")
-            childnode = node._children[child]
+            childnode = node.children[child]
             if isinstance(childnode, Symlink):
                 self._handle_symlink(childnode, streams)
             elif isinstance(childnode, File):
@@ -900,27 +874,27 @@ class ExportAction(Action):
 
     def _handle_symlink(self, node, streams):
         streams[1].writeln("Symlink: {0}".format(node.prettypath))
-        streams[1].writeln("Target: {0}".format(node._target))
+        streams[1].writeln("Target: {0}".format(node.target))
 
-        if node._meta:
+        if node.meta:
             self._dumpmeta(node, streams)
 
     def _handle_file(self, node, streams):
         streams[1].writeln("File: {0}".format(node.prettypath))
-        streams[1].writeln("Size: {0}".format(node._size))
-        streams[1].writeln("MD5: {0}".format(node._checksum))
-        streams[1].writeln("Modified: {0}".format(node._timestamp))
+        streams[1].writeln("Size: {0}".format(node.size))
+        streams[1].writeln("MD5: {0}".format(node.checksum))
+        streams[1].writeln("Modified: {0}".format(node.timestamp))
 
-        if node._checksum:
-            streams[0].writeln(node._checksum + ' *' + node.prettypath[2:])
+        if node.checksum:
+            streams[0].writeln(node.checksum + ' *' + node.prettypath[2:])
         else:
-            self._writer.stdout.status(node.prettypath, "MISSING CHECKSUM")
+            self.writer.stdout.status(node.prettypath, "MISSING CHECKSUM")
 
-        if node._meta:
+        if node.meta:
             self._dumpmeta(node, streams)
 
     def _dumpmeta(self, node, streams):
-        provides = [provided for meta in node._meta for provided in meta.provides]
+        provides = [provided for meta in node.meta for provided in meta.provides]
         if provides:
             streams[1].writeln("Provides: {0}".format(
                 ", ".join(
@@ -932,7 +906,7 @@ class ExportAction(Action):
                 )
             ))
 
-        depends = [depended for meta in node._meta for depended in meta.depends]
+        depends = [depended for meta in node.meta for depended in meta.depends]
         if depends:
             streams[1].writeln("Depends: {0}".format(
                 ", ".join(
@@ -945,16 +919,16 @@ class ExportAction(Action):
                 )
             ))
 
-        tags = set(tag for meta in node._meta for tag in meta.tags)
+        tags = set(tag for meta in node.meta for tag in meta.tags)
         if tags:
             streams[1].writeln("Tags: {0}".format(
                 ", ".join(sorted(tags))
             ))
 
-        descriptions = "\n".join(meta.description for meta in node._meta if meta.description)
+        descriptions = "\n".join(meta.description for meta in node.meta if meta.description)
         if descriptions:
             import textwrap
-            lines = textwrap.wrap(descriptions, 75) 
+            lines = textwrap.wrap(descriptions, 75)
             streams[1].writeln("Description:\n  {0}".format(
                 "\n  ".join(lines)
             ))
@@ -963,11 +937,11 @@ class ExportAction(Action):
 class CheckMetaAction(Action):
     """ Check the metadata (dependencies/etc). """
 
-    ACTION_NAME="checkmeta"
-    ACTION_DESC="Check metadata, dependencies, etc"
+    ACTION_NAME = "checkmeta"
+    ACTION_DESC = "Check metadata, dependencies, etc"
 
     def run(self):
-        coll = Collection.load(self._root, self._writer, self._verbose)
+        coll = Collection.load(self.root, self.writer, self.verbose)
         coll.loadmeta()
         coll.applymeta()
 
@@ -985,35 +959,35 @@ class CheckMetaAction(Action):
 
         # First gather all known packages that are actaully attached to a node
         packages = {}
-        self._checkdeps_walk_collect(coll._rootdir, packages)
+        self._checkdeps_walk_collect(coll.rootnode, packages)
 
         # Next check all dependencies from the nodes have a package to satisfy
-        return self._checkdeps_walk(coll._rootdir, packages)
+        return self._checkdeps_walk(coll.rootnode, packages)
 
     def _checkdeps_walk_collect(self, node, packages):
-        for meta in node._meta:
+        for meta in node.meta:
             for (name, version) in meta.provides:
                 if not name in packages:
                     packages[name] = set()
                 packages[name].add(version)
 
         if isinstance(node, Directory):
-            for child in sorted(node._children):
-                self._checkdeps_walk_collect(node._children[child], packages)
-                
+            for child in sorted(node.children):
+                self._checkdeps_walk_collect(node.children[child], packages)
+
     def _checkdeps_walk(self, node, packages):
         status = True
 
-        if node._meta:
-            for meta in node._meta:
+        if node.meta:
+            for meta in node.meta:
                 for depends in meta.depends:
                     if not self._checkdeps_find(depends, packages):
                         status = False
-                        self._writer.stdout.status(node.prettypath, "DEPENDS", str(depends))
+                        self.writer.stdout.status(node.prettypath, "DEPENDS", str(depends))
 
         if isinstance(node, Directory):
-            for child in sorted(node._children):
-                if not self._checkdeps_walk(node._children[child], packages):
+            for child in sorted(node.children):
+                if not self._checkdeps_walk(node.children[child], packages):
                     status = False
 
         return status
@@ -1066,9 +1040,35 @@ class CheckMetaAction(Action):
             return 0
 
     def _checkmeta_used(self, coll):
-        for meta in coll._allmeta:
-            if not meta._users:
-                self._writer.stdout.status(meta._node.prettypath, "UNUSEDMETA", meta.pattern)
+        for meta in coll.allmeta:
+            if not meta.users:
+                self.writer.stdout.status(meta.node.prettypath, "UNUSEDMETA", meta.pattern)
+
+
+class UpgradeAction(Action):
+
+    ACTION_NAME = "upgrade"
+    ACTION_DESC = "Upgrade collection information. """
+
+    def run(self):
+        if not self._upgrade1():
+            return False
+
+        return True
+
+    def _upgrade1(self):
+        orig_filename = os.path.join(self.root, "collection.xml")
+        new_filename = os.path.join(self.root, "_collection", "collection.xml")
+
+        if not os.path.exists(new_filename) and os.path.exists(orig_filename):
+            self.writer.stdout.status("./", "UPGRADE", "Moving collection.xml to _collection/collection.xml")
+
+            dirname = os.path.join(self.root, "_collection")
+            if not os.path.isdir(dirname):
+                os.makedirs(dirname)
+            os.rename(orig_filename, new_filename)
+            return True
+
 
 
 # Program entry point
@@ -1079,6 +1079,7 @@ def create_arg_parser():
 
     # Base arguments
     parser.add_argument("-v", "--verbose", dest="verbose", default=False, action="store_true")
+    parser.set_defaults(action=None)
 
     # Add commands
     commands = filter(lambda cls: cls.ACTION_NAME is not None, Action.get_subclasses())
@@ -1090,7 +1091,7 @@ def create_arg_parser():
         subparser.set_defaults(action=i)
 
     return parser
-        
+
 
 class VerboseChecker(object):
 
@@ -1120,6 +1121,9 @@ def main():
     parser = create_arg_parser()
     options = parser.parse_args()
     action = options.action
+    if action is None:
+        parser.print_help()
+        parser.exit()
     action.parse_arguments(options)
 
     verbose = VerboseChecker(options.verbose)
