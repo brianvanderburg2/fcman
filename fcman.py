@@ -2,27 +2,15 @@
 # vim: foldmethod=marker foldmarker={{{,}}}, foldlevel=0
 """ File collection management utility. """
 
-# Create upgrade action to convert from collection in root to subdir
-# Switch to Python 3 only (Solve various problems trying to handle both)
-# Error messages should only go to stderr
-# Informational messages should only be printed to stdout if verbose
-# Status messages for actions and outputs should be printed to stdout
-# stderror should be though of as program error:
-    # If we can't load the xml files or badly formatted, that is program error (go to stderr)
-# If a file is missing during a check, that is utility error (go to stdout)
-# All in-memory strings should be unicode (may need to check when parsing xml)
-# Text files should be UTF-8 encoded
-
-
 # {{{1 Meta information
 
 __author__ = "Brian Allen Vanderburg II"
 __copyright__ = "Copyright (C) 2013-2018 Brian Allen Vanderburg II"
 __license__ = "MIT License"
-__version__ = "0.2.20181105.1"
+__version__ = "20181107.1"
 
 
-# {{{1 Imports and such
+# {{{1 Imports
 
 import argparse
 from configparser import SafeConfigParser
@@ -49,48 +37,19 @@ except ImportError:
 if sys.version_info[0:2] < (3, 2):
     sys.exit("This program requires Python 3.2 or greater")
 
-# {{{1 Utility functions and stuff
-################################################################################
+# {{{1 Utilities and constants
 
 # Time difference to consider a file's timestamp changed
 TIMEDIFF = 2
 
-# Use namespaces
+# Use namespaces for reading, but now only write without namespaces
 NS_COLLECTION = "{urn:mrbavii.fcman:collection}"
-ET.register_namespace('c', NS_COLLECTION[1:-1])
 
-def realname(path, _case_sensitive=('abcDEF' == os.path.normcase('abcDEF'))):
-    """ Return true if the name presented is the same as the OS. """
-    # A real name means the OS represents the filename in the same case
-    # as stored in the collection.  This is only relavent if the OS uses
-    # case insensitive filenames
-
-    if _case_sensitive:
-        return True
-
-    # On case insensitive systems, we want to make sure the name matches
-    # what the OS tells us it would be from a directory listing.
-    dir = os.path.dirname(path)
-    name = os.path.basename(path)
-
-    return name in os.listdir(dir)
-
-def checksum(path):
-    """ Calculate the checksum and return the result. """
-    hasher = hashlib.md5()
-
-    with open(path, 'rb') as handle:
-        data = handle.read(4096000)
-        while len(data):
-            hasher.update(data)
-            data = handle.read(4096000)
-
-    return hasher.hexdigest()
 
 class StreamWriter(object):
     """ Write to a given stream. """
 
-    class _indent_ctx_mgr(object):
+    class _IndentContextManager(object):
         """ Provide a context manager for the indentation of a stream. """
 
         def __init__(self, writer):
@@ -102,20 +61,20 @@ class StreamWriter(object):
         def __exit__(self, type, value, traceback):
             self._writer.dedent()
 
-    def __init__(self, stream, filename=None, indent="    "):
+    def __init__(self, stream, indent="    "):
         """ Initialze the writer. """
         self._stream = stream
-        self._indent = 0
-        self._indentText = indent
+        self._indent_level = 0
+        self._indent_text = indent
 
     def indent(self):
         """ Increase the indent. """
-        self._indent += 1
-        return self._indent_ctx_mgr(self)
+        self._indent_level += 1
+        return self._IndentContextManager(self)
 
     def dedent(self):
         """ Decrease the indent. """
-        self._indent -= 1
+        self._indent_level -= 1
 
     def __enter__(self):
         return self
@@ -126,9 +85,10 @@ class StreamWriter(object):
 
     def writeln(self, line):
         """ Write a line of text to the stream. """
-        self._stream.write(self._indent * self._indentText)
+        self._stream.write(self._indent_level * self._indent_text)
         self._stream.write(line)
         self._stream.write("\n")
+
 
 class LogWriter(StreamWriter):
     """ A stream writer with status methods. """
@@ -152,25 +112,26 @@ class LogWriter(StreamWriter):
             with self.indent():
                 self.writeln("> " + msg)
 
+
 class TextFile(StreamWriter):
     """ A text file based on StreamWriter. """
 
     def __init__(self, filename):
         """ Initialize the text file. """
         stream = io.open(filename, "wt", encoding="utf-8", newline="\n")
-        StreamWriter.__init__(self, stream, filename)
+        StreamWriter.__init__(self, stream)
 
 
 class Writer(object):
-    """ This class will replace logger and provide some better. """
+    """ Wrapper for stdout and stderr streams. """
 
-    def __init__(self, redirect=None):
+    def __init__(self):
         """ Initialize teh writer. """
+
         self.stdout = LogWriter(sys.stdout)
         self.stderr = LogWriter(sys.stderr)
 
 # {{{1 Collection classes
-################################################################################
 
 class Node(object):
     """ A node represents a file, symlink, or directory in the collection. """
@@ -187,6 +148,7 @@ class Node(object):
             self.pathlist = parent.pathlist + (name,)
         else:
             assert isinstance(self, RootDirectory)
+            assert name is None
             self.pathlist = ()
 
     @property
@@ -245,7 +207,7 @@ class Symlink(Node):
 
     def exists(self):
         """ Test if the symlink exists. """
-        return os.path.islink(self.path) and realname(self.path)
+        return os.path.islink(self.path)
 
 
 class File(Node):
@@ -276,9 +238,21 @@ class File(Node):
         xml.set('timestamp', str(self.timestamp))
         xml.set('checksum', self.checksum)
 
+    def calc_checksum(self):
+        """ Calculate the checksum and return the result. """
+        hasher = hashlib.md5()
+
+        with open(self.path, 'rb') as handle:
+            data = handle.read(4096000)
+            while len(data):
+                hasher.update(data)
+                data = handle.read(4096000)
+
+        return hasher.hexdigest()
+
     def exists(self):
         """ Test if the file exists. """
-        return os.path.isfile(self.path) and not os.path.islink(self.path) and realname(self.path)
+        return os.path.isfile(self.path) and not os.path.islink(self.path)
 
 
 class Directory(Node):
@@ -326,7 +300,7 @@ class Directory(Node):
             else:
                 pass
 
-            element = ET.SubElement(xml, NS_COLLECTION + tag)
+            element = ET.SubElement(xml, tag)
             child.save(element)
 
     def ignore(self, name):
@@ -338,7 +312,7 @@ class Directory(Node):
 
     def exists(self):
         """ Test if the directory exists. """
-        return os.path.isdir(self.path) and not os.path.islink(self.path) and realname(self.path)
+        return os.path.isdir(self.path) and not os.path.islink(self.path)
 
 
 class RootDirectory(Directory):
@@ -385,7 +359,7 @@ class Collection(object):
 
     def save(self):
         """ Save the collection to XML. """
-        root = ET.Element(NS_COLLECTION + 'collection')
+        root = ET.Element('collection')
         self.rootnode.save(root)
 
         tree = ET.ElementTree(root)
@@ -409,7 +383,6 @@ class Collection(object):
 
         tree.write(self._filename, encoding='utf-8', xml_declaration=True,
                    method='xml', **kwargs)
-
 
     def loadmeta(self):
         """ Walk over each directory for a "fcmanmeta.xml" file """
@@ -461,7 +434,7 @@ class Collection(object):
             self.allmeta.append(meta)
 
     def applymeta(self):
-        """ Walk over all loaded meta information and match the globs
+        """ Walk over all loaded meta information and match the patterns
             to the nodes. """
 
         for meta in self.allmeta:
@@ -470,15 +443,16 @@ class Collection(object):
             parent = node.parent
 
             if pattern == ".":
-                parent.meta.append(meta.clone())
+                newmeta = meta.clone()
+                parent.meta.append(newmeta)
                 meta.users.append(parent)
                 continue
 
             if pattern[0:2] == "r:":
                 pattern = pattern[2:].replace("(@)", "(?P<version>[0-9\\.]+)")
                 regex = re.compile(pattern)
-                def matchfn(name):
-                    result = regex.match(name)
+                def matchfn(name, _regex=regex):
+                    result = _regex.match(name)
                     if result:
                         try:
                             version = result.group("version")
@@ -488,8 +462,8 @@ class Collection(object):
                     else:
                         return (False, None)
             else:
-                def matchfn(name):
-                    return (fnmatch.fnmatchcase(name, pattern), None)
+                def matchfn(name, _pattern=pattern):
+                    return (fnmatch.fnmatchcase(name, _pattern), None)
 
             for name in sorted(parent.children):
                 (matched, version) = matchfn(name)
@@ -506,10 +480,13 @@ class Collection(object):
 
 
 class MetaInfo(object):
+    """ Represent metadata. """
 
     def __init__(self, node):
+        """ Initial state of metadata. """
         self.node = node
         self.users = []
+        self.name = None
         self.pattern = None
         self.autoname = []
         self.provides = []
@@ -519,16 +496,25 @@ class MetaInfo(object):
 
 
     @classmethod
-    def load(cls, node, pattern, config):
+    def load(cls, node, name, config):
+        """ Load metadata from an INI config section. """
 
         meta = MetaInfo(node)
 
-        def splitval(s):
-            s = ''.join(map(lambda ch: ',' if ch in " \t\r\n" else ch, s))
-            return list(filter(lambda i: len(i) > 0, s.split(',')))
+        def splitval(val):
+            val = ''.join(map(lambda ch: ',' if ch in " \t\r\n" else ch, val))
+            return list(filter(lambda i: len(i) > 0, val.split(',')))
+
+        meta.name = name
 
         # pattern
-        meta.pattern = pattern
+        if "pattern" in config:
+            meta.pattern = config.get("pattern")
+        else:
+            # Allow using the config section name as the pattern when possible
+            # so the user can just do [*.txt] instead of [textfiles]\npattern=*.txt
+            meta.pattern = name
+
         if "autoname" in config:
             meta.autoname = splitval(config["autoname"])
 
@@ -568,31 +554,18 @@ class MetaInfo(object):
 
     def clone(self):
         """ Make a copy of the meta but with no users. """
-        m = MetaInfo(self.node)
-        m.pattern = self.pattern
-        m.autoname = list(self.autoname)
-        m.provides = list(self.provides)
-        m.depends = list(self.depends)
-        m.tags = list(self.tags)
-        m.description = self.description
+        newmeta = MetaInfo(self.node)
+        newmeta.name = self.name
+        newmeta.pattern = self.pattern
+        newmeta.autoname = list(self.autoname)
+        newmeta.provides = list(self.provides)
+        newmeta.depends = list(self.depends)
+        newmeta.tags = list(self.tags)
+        newmeta.description = self.description
 
-        return m
+        return newmeta
 
-
-    def dump(self):
-        print(self.pattern)
-        for i in self.autoname:
-            print(i)
-        for i in self.provides:
-            print(i)
-        for i in self.depends:
-            print(i)
-        for i in self.tags:
-            print(i)
-        print(self.description)
-
-# Actions
-################################################################################
+# {{{1 Actions
 
 class Action(object):
     """ A base action. """
@@ -635,15 +608,19 @@ class CreateAction(Action):
         coll.save()
         return True
 
+
 class CheckAction(Action):
     """ Check the collection. """
 
     ACTION_NAME = "check"
     ACTION_DESC = "Perform quick collection check"
 
+    def __init__(self, *args, **kwargs):
+        Action.__init__(self, *args, **kwargs)
+        self._fullcheck = False
+
     def run(self):
         coll = Collection.load(self.root, self.writer, self.verbose)
-        self._fullcheck = False
         return self.handle_directory(coll.rootnode)
 
     def _missing_dir(self, node):
@@ -677,7 +654,7 @@ class CheckAction(Action):
         if self._fullcheck:
             if self.verbose:
                 self.writer.stdout.status(node.prettypath, 'PROCESSING')
-            if node.checksum != checksum(node.path):
+            if node.checksum != node.calc_checksum():
                 status = False
                 self.writer.stdout.status(node.prettypath, 'CHECKSUM')
 
@@ -746,9 +723,12 @@ class VerifyAction(CheckAction):
     ACTION_NAME = "verify"
     ACTION_DESC = "Perform full checksum verification"
 
+    def __init__(self, *args, **kwargs):
+        CheckAction.__init__(self, *args, **kwargs)
+        self._fullcheck = True
+
     def run(self):
         coll = Collection.load(self.root, self.writer, self.verbose)
-        self._fullcheck = True
         return self.handle_directory(coll.rootnode)
 
 
@@ -776,7 +756,7 @@ class UpdateAction(Action):
         if abs(node.timestamp - stat.st_mtime) > TIMEDIFF or node.size != stat.st_size or node.checksum == "":
             if self.verbose:
                 self.writer.stdout.status(node.prettypath, 'PROCESSING')
-            node.checksum = checksum(node.path)
+            node.checksum = node.calc_checksum()
             node.timestamp = int(stat.st_mtime)
             node.size = stat.st_size
             self.writer.stdout.status(node.prettypath, 'CHECKSUM')
@@ -854,7 +834,7 @@ class ExportAction(Action):
     def _handle_directory(self, node, streams):
         if self.verbose:
             self.writer.stdout.status(node.prettypath, 'PROCESSING')
-        
+
         streams[1].writeln("Directory: {0}".format(node.prettypath))
 
         if node.meta:
@@ -1016,25 +996,25 @@ class CheckMetaAction(Action):
             # Found a version that is within the range
             return True
 
-    def _checkdeps_compare(self, v1, v2):
+    def _checkdeps_compare(self, ver1, ver2):
         """ A simple version compare based only on numbers and periods. """
 
         try:
-            v1 = list(map(lambda v: int(v), v1.split(".")))
-            v2 = list(map(lambda v: int(v), v2.split(".")))
+            ver1 = list(map(lambda ver: int(ver), ver1.split(".")))
+            ver2 = list(map(lambda ver: int(ver), ver2.split(".")))
         except ValueError:
             return False
 
         # pad to the same length
-        if len(v1) < len(v2):
-            v1.extend([0] * (len(v2) - len(v1)))
-        elif len(v2) < len(v1):
-            v2.extend([0] * (len(v1) - len(v2)))
+        if len(ver1) < len(ver2):
+            ver1.extend([0] * (len(ver2) - len(ver1)))
+        elif len(ver2) < len(ver1):
+            ver2.extend([0] * (len(ver1) - len(ver2)))
 
         # per element compare
-        if v1 < v2:
+        if ver1 < ver2:
             return -1
-        elif v1 > v2:
+        elif ver1 > ver2:
             return 1
         else:
             return 0
@@ -1042,7 +1022,7 @@ class CheckMetaAction(Action):
     def _checkmeta_used(self, coll):
         for meta in coll.allmeta:
             if not meta.users:
-                self.writer.stdout.status(meta.node.prettypath, "UNUSEDMETA", meta.pattern)
+                self.writer.stdout.status(meta.node.prettypath, "UNUSEDMETA", meta.name)
 
 
 class UpgradeAction(Action):
@@ -1071,8 +1051,7 @@ class UpgradeAction(Action):
 
 
 
-# Program entry point
-################################################################################
+# {{{ Program entry point
 
 def create_arg_parser():
     parser = argparse.ArgumentParser()
