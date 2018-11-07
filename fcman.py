@@ -1082,6 +1082,8 @@ class FindTagAction(Action):
         return self._handle_node(coll.rootnode)
 
     def _handle_node(self, node):
+        status = False
+
         alltags = set(tag.lower() for meta in node.meta for tag in meta.tags)
         findtags = set(tag.lower() for tag in self.options.tags)
 
@@ -1093,11 +1095,15 @@ class FindTagAction(Action):
             matched = len(found) > 0
 
         if matched:
+            status = True
             self.writer.stdout.status(node.prettypath, "FINDTAG", ",".join(sorted(found)))
 
         if isinstance(node, Directory):
             for child in sorted(node.children):
-                self._handle_node(node.children[child])
+                if self._handle_node(node.children[child]):
+                    status = True
+
+        return status
 
 
 class FindDescAction(Action):
@@ -1131,6 +1137,8 @@ class FindDescAction(Action):
         return self._handle_node(coll.rootnode)
 
     def _handle_node(self, node):
+        status = False
+
         alldescs = "".join(meta.description.lower() for meta in node.meta if meta.description)
         finddescs = set(i.lower() for i in self.options.descs)
         found = set()
@@ -1145,11 +1153,15 @@ class FindDescAction(Action):
             matched = len(found) > 0
 
         if matched:
+            status = True
             self.writer.stdout.status(node.prettypath, "FINDDESC", ",".join(sorted(found)))
 
         if isinstance(node, Directory):
             for child in sorted(node.children):
-                self._handle_node(node.children[child])
+                if self._handle_node(node.children[child]):
+                    status = True
+
+        return status
 
 
 # {{{1 Program entry point
