@@ -14,9 +14,11 @@ test: check
 clean: check
 	rm -rf test/output
 	rm -rf output
+	find -name "*.py[co]" -delete
+	find -depth \( -path "*/__pycache__/*" -o -name __pycache__ \) -delete
 
 .PHONY: tarball
-tarball: NAME:=fcman-$(shell date +%Y%m%d)-$(shell git describe --always)
+tarball: NAME:=mrbavii_fcman-$(shell git symbolic-ref --short HEAD)-$(shell date +%Y%m%d)-$(shell git describe --always)
 tarball: check clean
 	mkdir -p output
 	git archive --format=tar --prefix=$(NAME)/ HEAD | xz > output/$(NAME).tar.xz
