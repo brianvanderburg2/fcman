@@ -7,7 +7,7 @@
 __author__ = "Brian Allen Vanderburg II"
 __copyright__ = "Copyright (C) 2013-2018 Brian Allen Vanderburg II"
 __license__ = "MIT License"
-__version__ = "20181107.1"
+__version__ = "20181107.2"
 
 
 # {{{1 Imports
@@ -1026,6 +1026,7 @@ class CheckMetaAction(Action):
 
 
 class UpgradeAction(Action):
+    """ Perform upgrade of collection. """
 
     ACTION_NAME = "upgrade"
     ACTION_DESC = "Upgrade collection information. """
@@ -1049,6 +1050,106 @@ class UpgradeAction(Action):
             os.rename(orig_filename, new_filename)
             return True
 
+
+class FindTagAction(Action):
+    """ Find paths that match specific tags. """
+
+    ACTION_NAME = "findtag"
+    ACTION_DESC = "Find paths that match specific tags."
+
+    @classmethod
+    def add_arguments(cls, parser):
+        super(FindTagAction, cls).add_arguments(parser)
+
+        parser.add_argument(
+            "--all",
+            dest="match_all",
+            default=False,
+            action="store_true",
+            help="Report paths only if the path has all tags specified."
+        )
+        parser.add_argument(
+            "tags",
+            nargs="+",
+            help="List of tags to find."
+        )
+
+    def run(self):
+        coll = Collection.load(self.root, self.writer, self.verbose)
+        coll.loadmeta()
+        coll.applymeta()
+
+        return self._handle_node(coll.rootnode)
+
+    def _handle_node(self, node):
+        alltags = set(tag.lower() for meta in node.meta for tag in meta.tags)
+        findtags = set(tag.lower() for tag in self.options.tags)
+
+        found = findtags.intersection(alltags)
+
+        if self.options.match_all:
+            matched = (found == findtags)
+        else:
+            matched = len(found) > 0
+
+        if matched:
+            self.writer.stdout.status(node.prettypath, "FINDTAG", ",".join(sorted(found)))
+
+        if isinstance(node, Directory):
+            for child in sorted(node.children):
+                self._handle_node(node.children[child])
+
+
+class FindDescAction(Action):
+    """ Find paths that match specific descriptions. """
+
+    ACTION_NAME = "finddesc"
+    ACTION_DESC = "Find paths that match specific descriptions."
+
+    @classmethod
+    def add_arguments(cls, parser):
+        super(FindDescAction, cls).add_arguments(parser)
+
+        parser.add_argument(
+            "--all",
+            dest="match_all",
+            default=False,
+            action="store_true",
+            help="Report paths only if the path has all descriptions specified."
+        )
+        parser.add_argument(
+            "descs",
+            nargs="+",
+            help="List of descriptions to find."
+        )
+
+    def run(self):
+        coll = Collection.load(self.root, self.writer, self.verbose)
+        coll.loadmeta()
+        coll.applymeta()
+
+        return self._handle_node(coll.rootnode)
+
+    def _handle_node(self, node):
+        alldescs = "".join(meta.description.lower() for meta in node.meta if meta.description)
+        finddescs = set(i.lower() for i in self.options.descs)
+        found = set()
+
+        for desc in finddescs:
+            if desc in alldescs:
+                found.add(desc)
+
+        if self.options.match_all:
+            matched = (found == finddescs)
+        else:
+            matched = len(found) > 0
+
+        if matched:
+            self.writer.stdout.status(node.prettypath, "FINDDESC", ",".join(sorted(found)))
+
+        if isinstance(node, Directory):
+            for child in sorted(node.children):
+                self._handle_node(node.children[child])
 
 
 # {{{1 Program entry point
