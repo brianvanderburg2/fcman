@@ -1051,7 +1051,7 @@ class UpgradeAction(Action):
 
 
 
-# {{{ Program entry point
+# {{{1 Program entry point
 
 def create_arg_parser():
     parser = argparse.ArgumentParser()
