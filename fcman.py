@@ -7,7 +7,7 @@
 __author__ = "Brian Allen Vanderburg II"
 __copyright__ = "Copyright (C) 2013-2018 Brian Allen Vanderburg II"
 __license__ = "MIT License"
-__version__ = "20181107.2"
+__version__ = "20181108.1"
 
 
 # {{{1 Imports
@@ -434,49 +434,66 @@ class Collection(object):
             self.allmeta.append(meta)
 
     def applymeta(self):
-        """ Walk over all loaded meta information and match the patterns
-            to the nodes. """
-
+        """ Apply meta information to matching nodes. """
         for meta in self.allmeta:
-            node = meta.node
+            parent = meta.node.parent
             pattern = meta.pattern
-            parent = node.parent
 
-            if pattern == ".":
-                newmeta = meta.clone()
-                parent.meta.append(newmeta)
-                meta.users.append(parent)
-                continue
+            # Split by "/" and create regex for each path component
+            parts = [
+                fnmatch.translate(part).replace(
+                    "FILEVERSION",
+                    "(?P<version>[0-9\\.]+)"
+                )
+                for part in pattern.split("/") if len(part)
+            ]
+            regex = [re.compile(part) for part in parts]
 
-            if pattern[0:2] == "r:":
-                pattern = pattern[2:].replace("(@)", "(?P<version>[0-9\\.]+)")
-                regex = re.compile(pattern)
-                def matchfn(name, _regex=regex):
-                    result = _regex.match(name)
-                    if result:
-                        try:
-                            version = result.group("version")
-                        except IndexError:
-                            version = None
-                        return (True, version)
-                    else:
-                        return (False, None)
-            else:
-                def matchfn(name, _pattern=pattern):
-                    return (fnmatch.fnmatchcase(name, _pattern), None)
+            # Recursively apply meta using regex list
+            self._applymeta_walk(parent, regex, meta)
 
-            for name in sorted(parent.children):
-                (matched, version) = matchfn(name)
-                if matched:
-                    child = parent.children[name]
+    def _applymeta_walk(self, node, regex, meta, _version=None):
+        """ Apply the metadata to the matching nodes. """
+
+        if len(regex) == 0:
+            return
+
+        # Check if the meta applies to this directory
+        if len(regex) == 1 and regex[0].match("."):
+            newmeta = meta.clone()
+            node.meta.append(newmeta)
+            meta.users.append(node)
+            return
+
+        # Find matching child nodes
+        for name in sorted(node.children):
+            child = node.children[name]
+
+            match = regex[0].match(name)
+            if match:
+                # Get the version if specified
+                try:
+                    _version = match.group("version")
+                except IndexError:
+                    # keep current version value
+                    pass
+
+                if len(regex) == 1:
+                    # last part of the regex so it applies to the found node
                     meta.users.append(child)
 
                     newmeta = meta.clone()
                     child.meta.append(newmeta)
 
-                    if meta.autoname:
-                        for autoname in meta.autoname:
-                            newmeta.provides.append((autoname, version))
+                    if _version is not None:
+                        # Only apply autoname/autoversion if version was found
+                        newmeta.provides.extend(
+                            [(autoname, _version) for autoname in meta.autoname]
+                        )
+
+                elif len(regex) > 1 and isinstance(child, Directory):
+                    # more nested regex to match, recurse if node is directory
+                    self._applymeta_walk(child, regex[1:], meta, _version)
 
 
 class MetaInfo(object):

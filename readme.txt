@@ -53,23 +53,23 @@ name= or name: syntax
 [name]
 ; represent a name for a metadata section
 
-pattern=fsglob or regex
+pattern=fsglob
 ; specify a pattern to match items that are children of the current directory
 ; node.  If pattern is ".", then it will apply to the current directory node
-; pattern can be anything matched with fnmatch.fnmatchcase.  If pattern starts
-; with "r:", the rest of the pattern string is a regular expression.  A group
-; named "version" can be used to extract the dotted decimal version number.
-; If "(@)" occurs in the pattern string when used as a regular expression, it
-; will automatically be replaced with the regular expression to match one or
-; more dotted decimal segments.
-; if pattern is not specified, then the section name is used as the pattern
+; pattern can be anything matched with fnmatch.fnmatchcase. Internally it is
+; split by "/" and then compiled into regular expressions using fnmatch.
+; If the pattern "FILEVERSION" is found in a part, it is translated such that
+; it will match repeading digits 0-9 and "." and be used as the version of the
+; file.   If FILEVERSION is found in more than one segment, only the last
+; segment will be used to determine the file version.
 
 autoname=name
 ; Automatically add additional provides items to nodes that match the pattern.
 ; if the pattern is a regular expression and includes a version group, then
 ; the portion of the node name that matches the version group will become the
 ; provides version.  Multiple names can be specified by separating with space,
-; newlines, or commas
+; newlines, or commas.  The names are not created as additional packages if
+; a version was not found.
 
 provides=package
 ; Specify a package provided by the matched item.  The format is "name" or
