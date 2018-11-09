@@ -106,6 +106,8 @@ class LogWriter(StreamWriter):
         check = (path, status)
         if check != self._last:
             self._last = check
+            if isinstance(path, (list, tuple)):
+                path = "./" + "/".join(path)
             self.writeln(status + ":" + path)
 
         if msg:
@@ -590,8 +592,10 @@ class Action(object):
     ACTION_NAME = None
     ACTION_DESC = ""
 
-    def __init__(self, root, options, writer, verbose):
-        self.root = root
+    def __init__(self, options, writer, verbose):
+        self.collection = None
+        self.root = os.getcwd() # A default, may be changed in child classes
+        self.subpath = []
         self.options = options
         self.writer = writer
         self.verbose = verbose
@@ -613,6 +617,101 @@ class Action(object):
     @classmethod
     def parse_arguments(cls, options):
         pass
+
+    def find_root(self):
+        """ Find the root directory and set self.root, self.subpath.
+            Return True on success or False on failure. """
+
+        # We look for _collection/collection.xml
+        head = os.getcwd()
+        subpath = []
+
+        while head:
+            if os.path.isfile(os.path.join(head, "_collection", "collection.xml")):
+                self.root = head
+                self.subpath = subpath
+                return True
+
+            (head, tail) = os.path.split(head)
+            if tail:
+                subpath.append(tail)
+            else:
+                break
+
+        return False
+
+    def load(self, find=None):
+        if find is None:
+            find = self.options.walk
+
+        if find and not self.find_root():
+            self.writer.stderr.status(os.getcwd(), "NOROOT")
+            return False
+
+        if self.verbose:
+            self.writer.stdout.status(self.root, "ROOT")
+            if self.subpath:
+                self.writer.stdout.status(self.subpath, "SUBPATH")
+
+        self.collection = Collection.load(self.root, self.writer, self.verbose)
+        return True
+
+    def normalize_path(self, path):
+        """ Normalize a path and turn the normalized result.
+            Return None if the path cannot be normalized. """
+
+        if path is None or len(path) == 0:
+            return self.subpath
+
+        if not isinstance(path, (list, tuple)):
+            path = [i for i in path.replace(os.sep, "/").split("/")]
+
+        if path[0] == "": # started with "/"
+            result = []
+            path = path[1:]
+        else:
+            result = list(self.subpath)
+
+
+        for part in path:
+            if len(part) == 0:
+                continue
+            elif part == ".":
+                continue
+            elif part == "..":
+                if len(result):
+                    result.pop()
+                else:
+                    self.writer.stderr.status(path, "BADPATH")
+                    return None
+            else:
+                result.append(part)
+
+        return result
+
+    def find_nearest_node(self, path):
+        """ Find the node or the nearest parent node.
+            Return is (node, remaining_path) """
+
+        path = list(path)
+        node = self.collection.rootnode
+
+        while len(path):
+            for name in node.children:
+                if name == path[0]:
+                    node = node.children[name]
+                    path.pop(0)
+                    break # break out of for loop
+            else:
+                break # break out of while loop if for loop wasn't broken
+
+        # len(path) == 0 means we found the node, else just the nearest parent
+        return (node, path)
+
+    def find_node(self, path):
+        """ Find the exact node or return None. """
+        (node, remaining_path) = self.find_nearest_node(path)
+        return node if not remaining_path else None
 
 
 class CreateAction(Action):
@@ -636,9 +735,36 @@ class CheckAction(Action):
         Action.__init__(self, *args, **kwargs)
         self._fullcheck = False
 
+    @classmethod
+    def add_arguments(cls, parser):
+        super(CheckAction, cls).add_arguments(parser)
+        parser.add_argument("path", nargs="?", default=".", help="Path to " + cls.ACTION_NAME)
+
     def run(self):
-        coll = Collection.load(self.root, self.writer, self.verbose)
-        return self.handle_directory(coll.rootnode)
+        if not self.load():
+            return False
+
+        path = self.normalize_path(self.options.path)
+        if path is None:
+            return False
+        elif self.verbose:
+            self.writer.stdout.status("./" + "/".join(path), "WORKPATH")
+
+        node = self.find_node(path)
+        if not node:
+            self.writer.stdout.status("./" + "/".join(path), "NONODE")
+            return False
+
+
+        if isinstance(node, Symlink):
+            return self.handle_symlink(node)
+        elif isinstance(node, File):
+            return self.handle_file(node)
+        elif isinstance(node, Directory):
+            return self.handle_directory(node)
+        else:
+            return False
+
 
     def _missing_dir(self, node):
         for i in sorted(node.children):
@@ -693,7 +819,7 @@ class CheckAction(Action):
                 status = False
 
                 # Report all subitems
-                if isinstance(newnode, Directory):
+                if isinstance(newnode, Directory) and self.options.recurse:
                     self._missing_dir(newnode)
 
 
@@ -705,7 +831,7 @@ class CheckAction(Action):
 
                 # Show new child items
                 path = node.path + os.sep + i
-                if os.path.isdir(path) and not os.path.islink(path):
+                if os.path.isdir(path) and not os.path.islink(path) and self.options.recurse:
                     newnode = Directory(node, i)
 
                     orig = self._fullcheck
@@ -725,7 +851,7 @@ class CheckAction(Action):
                 elif isinstance(child, File):
                     if not self.handle_file(child):
                         status = False
-                elif isinstance(child, Directory):
+                elif isinstance(child, Directory) and self.options.recurse:
                     if not self.handle_directory(child):
                         status = False
                 else:
@@ -743,10 +869,6 @@ class VerifyAction(CheckAction):
     def __init__(self, *args, **kwargs):
         CheckAction.__init__(self, *args, **kwargs)
         self._fullcheck = True
-
-    def run(self):
-        coll = Collection.load(self.root, self.writer, self.verbose)
-        return self.handle_directory(coll.rootnode)
 
 
 class UpdateAction(Action):
@@ -1188,6 +1310,8 @@ def create_arg_parser():
 
     # Base arguments
     parser.add_argument("-v", "--verbose", dest="verbose", default=False, action="store_true")
+    parser.add_argument("-w", "--walk", dest="walk", default=False, action="store_true")
+    parser.add_argument("--no-recurse", dest="recurse", default=True, action="store_false")
     parser.set_defaults(action=None)
 
     # Add commands
@@ -1240,9 +1364,7 @@ def main():
 
 
     # Do stuff
-    root = os.getcwd()
-
-    if not action(root, options, writer, verbose).run():
+    if not action(options, writer, verbose).run():
         return -1
 
 if __name__ == '__main__':
