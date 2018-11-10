@@ -970,8 +970,10 @@ class UpdateAction(Action):
     @classmethod
     def add_arguments(cls, parser):
         super(UpdateAction, cls).add_arguments(parser)
-        parser.add_argument("-f", "--force", dest="force", default=False,
-            action="store_true", help="Always update the checksum.")
+        parser.add_argument(
+            "-f", "--force", dest="force", default=False,
+            action="store_true", help="Always update the checksum."
+        )
         parser.add_argument("path", nargs="?", default=".", help="Path to update")
 
     def run(self):
@@ -1180,8 +1182,11 @@ class AddAction(UpdateAction):
     def add_arguments(cls, parser):
         super(AddAction, cls).add_arguments(parser)
 
-        parser.add_argument("-p", "--parents", dest="parents", default=False, action="store_true")
-        parser.add_argument("path")
+        parser.add_argument(
+            "-p", "--parents", dest="parents", default=False,
+            action="store_true", help="Create parent directory nodes if possible and needed"
+        )
+        parser.add_argument("path", help="The file system item to add.")
 
     def run(self):
         if not self.load():
@@ -1519,7 +1524,7 @@ class FindTagAction(Action):
         super(FindTagAction, cls).add_arguments(parser)
 
         parser.add_argument(
-            "--all",
+            "-a", "--all",
             dest="match_all",
             default=False,
             action="store_true",
@@ -1581,7 +1586,7 @@ class FindDescAction(Action):
         super(FindDescAction, cls).add_arguments(parser)
 
         parser.add_argument(
-            "--all",
+            "-a", "--all",
             dest="match_all",
             default=False,
             action="store_true",
@@ -1643,7 +1648,7 @@ def create_arg_parser():
     # Base arguments
     parser.add_argument("-v", "--verbose", dest="verbose", default=False, action="store_true")
     parser.add_argument("-w", "--walk", dest="walk", default=False, action="store_true")
-    parser.add_argument("--no-recurse", dest="recurse", default=True, action="store_false")
+    parser.add_argument("-x", "--no-recurse", dest="recurse", default=True, action="store_false")
     parser.set_defaults(action=None)
 
     # Add commands
