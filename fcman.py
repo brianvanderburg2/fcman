@@ -720,7 +720,7 @@ class Action(object):
 
             (head, tail) = os.path.split(head)
             if tail:
-                subpath.append(tail)
+                subpath.insert(0, tail)
             else:
                 break
 
