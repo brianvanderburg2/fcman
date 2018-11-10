@@ -185,6 +185,92 @@ class Node(object):
         """ Test if the filesystem path exists. """
         raise NotImplementedError
 
+    def reparent(self, parent):
+        """ Move the node to the given parent. """
+
+        assert parent.collection is self.collection
+
+        # We must have a parent (can't reparent the root directory)
+        if self.parent is None:
+            return False
+
+        # Must move to a directory
+        if not isinstance(parent, Directory):
+            return False
+
+        # First walk up the parent and make sure it is not a child of ours
+        node = parent
+        while node:
+            if node is self:
+                return False
+            node = node.parent
+
+        # The new parent can't have a node with the same name
+        if self.name in parent.children:
+            return False
+
+        # Remove from our parent and insert into new parent
+        assert self.parent.children[self.name] is self
+        self.parent.children.pop(self.name)
+
+        # Add to new parent and update path
+        self.parent = parent
+        parent.children[self.name] = self
+        self._update_pathlist()
+
+        return True
+
+    def rename(self, newname):
+        """ Rename the node. """
+
+        # Can't rename the root directory
+        if self.parent is None:
+            return False
+
+        # Must have a name
+        if not newname:
+            return False
+
+        # Check if name already exists
+        if newname in self.parent.children:
+            return False
+
+        # Remove the current name
+        assert self.parent.children[self.name] is self
+        self.parent.children.pop(self.name)
+
+        # Set and insert the new name and update the path
+        self.name = newname
+        self.parent.children[newname] = self
+        self._update_pathlist()
+
+        return True
+
+    def delete(self):
+        """ Remove this node. """
+
+        # Can't remove the root directory
+        if self.parent is None:
+            return False
+
+        # Remove the node from the parent
+        assert self.parent.children[self.name] is self
+        self.parent.children.pop(self.name)
+        self.parent = None
+
+        # If metadata is loaded (unlikely if this method is being called),
+        # then some metadata may still point to this node.  Since the
+        # application is a run and exit, no point release all the references
+
+        return True
+
+    def _update_pathlist(self):
+        """ Recursively update the path list. """
+        self.pathlist = self.parent.pathlist + (self.name,)
+        if isinstance(self, Directory):
+            for name in self.children:
+                self.children[name]._update_pathlist()
+
 
 class Symlink(Node):
     """ A symbolic link node. """
@@ -752,7 +838,7 @@ class CheckAction(Action):
 
         node = self.find_node(path)
         if not node:
-            self.writer.stdout.status("./" + "/".join(path), "NONODE")
+            self.writer.stderr.status("./" + "/".join(path), "NONODE")
             return False
 
 
@@ -941,6 +1027,114 @@ class UpdateAction(Action):
                 self.handle_directory(child)
             else:
                 pass
+
+
+class MoveAction(Action):
+    """ Move a node to a new parent. """
+
+    ACTION_NAME = "move"
+    ACTION_DESC = "Move node to a new parent."
+
+    @classmethod
+    def add_arguments(cls, parser):
+        """ Add our arguments. """
+        super(MoveAction, cls).add_arguments(parser)
+        parser.add_argument("path", help="The path of the node to move.")
+        parser.add_argument("parent", help="The path of the new parent.")
+
+    def run(self):
+        if not self.load():
+            return False
+
+        nodepath = self.normalize_path(self.options.path)
+        parentpath = self.normalize_path(self.options.parent)
+
+        if nodepath is None or parentpath is None:
+            return False
+
+        node = self.find_node(nodepath)
+        parent = self.find_node(parentpath)
+
+        if node is None:
+            self.writer.stderr.status(nodepath, "NONODE")
+
+        if parent is None:
+            self.writer.stderr.status(parentpath, "NONODE")
+
+        if node is None or parent is None:
+            return False
+
+        if not node.reparent(parent):
+            self.writer.stderr.status(nodepath, "NOMOVE")
+            return False
+
+        self.collection.save()
+        return True
+
+
+class RenameAction(Action):
+    """ Rename a node. """
+
+    ACTION_NAME = "rename"
+    ACTION_DESC = "Rename a node."
+
+    @classmethod
+    def add_arguments(cls, parser):
+        """ Add our arguments. """
+        super(RenameAction, cls).add_arguments(parser)
+        parser.add_argument("path", help="The path of the node to rename.")
+        parser.add_argument("name", help="The name to rename to.")
+
+    def run(self):
+        if not self.load():
+            return False
+
+        nodepath = self.normalize_path(self.options.path)
+        if nodepath is None:
+            return False
+
+        node = self.find_node(nodepath)
+        if node is None:
+            self.writer.stderr.status(nodepath, "NONODE")
+
+        if not node.rename(self.options.name):
+            self.writer.stderr.status(nodepath, "NORENAME")
+            return False
+
+        self.collection.save()
+        return True
+
+
+class DeleteAction(Action):
+    """ Delete a node. """
+
+    ACTION_NAME = "delete"
+    ACTION_DESC = "Delete a node."
+
+    @classmethod
+    def add_arguments(cls, parser):
+        """ Add our arguments. """
+        super(DeleteAction, cls).add_arguments(parser)
+        parser.add_argument("path", help="The path of the node to delete.")
+
+    def run(self):
+        if not self.load():
+            return False
+
+        nodepath = self.normalize_path(self.options.path)
+        if nodepath is None:
+            return False
+
+        node = self.find_node(nodepath)
+        if node is None:
+            self.writer.stderr.status(nodepath, "NONODE")
+
+        if not node.delete():
+            self.writer.stderr.status(nodepath, "NODELETE")
+            return False
+
+        self.collection.save()
+        return True
 
 
 class ExportAction(Action):
