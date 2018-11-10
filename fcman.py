@@ -7,7 +7,7 @@
 __author__ = "Brian Allen Vanderburg II"
 __copyright__ = "Copyright (C) 2013-2018 Brian Allen Vanderburg II"
 __license__ = "MIT License"
-__version__ = "20181108.1"
+__version__ = "20181110.1"
 
 
 # {{{1 Imports
@@ -503,7 +503,7 @@ class Collection(object):
             self.writer.stdout.status(node.prettypath, 'LOADING')
 
         config = SafeConfigParser()
-        read = config.read(node.prettypath)
+        read = config.read(node.path)
         if not read:
             self.writer.stderr.status(node.prettypath, 'LOAD ERROR')
             return False
@@ -806,8 +806,10 @@ class CreateAction(Action):
     ACTION_DESC = "Create a collection"
 
     def run(self):
-        coll = Collection(self.root, self.writer, self.verbose)
-        coll.save()
+        # we always create in the current directory
+        # TODO: don't create if already exists
+        self.collection = Collection(self.root, self.writer, self.verbose)
+        self.collection.save()
         return True
 
 
@@ -834,11 +836,11 @@ class CheckAction(Action):
         if path is None:
             return False
         elif self.verbose:
-            self.writer.stdout.status("./" + "/".join(path), "WORKPATH")
+            self.writer.stdout.status(path, "WORKPATH")
 
         node = self.find_node(path)
-        if not node:
-            self.writer.stderr.status("./" + "/".join(path), "NONODE")
+        if node is None:
+            self.writer.stderr.status(path, "NONODE")
             return False
 
 
@@ -850,7 +852,6 @@ class CheckAction(Action):
             return self.handle_directory(node)
         else:
             return False
-
 
     def _missing_dir(self, node):
         for i in sorted(node.children):
@@ -963,10 +964,36 @@ class UpdateAction(Action):
     ACTION_NAME = "update"
     ACTION_DESC = "Update the collection"
 
+    @classmethod
+    def add_arguments(cls, parser):
+        super(UpdateAction, cls).add_arguments(parser)
+        parser.add_argument("path", nargs="?", default=".", help="Path to update")
+
     def run(self):
-        coll = Collection.load(self.root, self.writer, self.verbose)
-        self.handle_directory(coll.rootnode)
-        coll.save()
+        if not self.load():
+            return False
+
+        path = self.normalize_path(self.options.path)
+        if path is None:
+            return False
+        elif self.verbose:
+            self.writer.stdout.status(path, "WORKPATH")
+
+        node = self.find_node(path)
+        if node is None:
+            self.writer.stderr.status(path, "NONODE")
+            return False
+
+        if isinstance(node, Symlink):
+            self.handle_symlink(node)
+        elif isinstance(node, File):
+            self.handle_file(node)
+        elif isinstance(node, Directory):
+            self.handle_directory(node)
+        else:
+            return False
+
+        self.collection.save()
         return True
 
     def handle_symlink(self, node):
@@ -1023,7 +1050,7 @@ class UpdateAction(Action):
                 self.handle_symlink(child)
             elif isinstance(child, File):
                 self.handle_file(child)
-            elif isinstance(child, Directory):
+            elif isinstance(child, Directory) and self.options.recurse:
                 self.handle_directory(child)
             else:
                 pass
@@ -1096,6 +1123,7 @@ class RenameAction(Action):
         node = self.find_node(nodepath)
         if node is None:
             self.writer.stderr.status(nodepath, "NONODE")
+            return False
 
         if not node.rename(self.options.name):
             self.writer.stderr.status(nodepath, "NORENAME")
@@ -1128,6 +1156,7 @@ class DeleteAction(Action):
         node = self.find_node(nodepath)
         if node is None:
             self.writer.stderr.status(nodepath, "NONODE")
+            return False
 
         if not node.delete():
             self.writer.stderr.status(nodepath, "NODELETE")
@@ -1144,11 +1173,13 @@ class ExportAction(Action):
     ACTION_DESC = "Export information"
 
     def run(self):
-        coll = Collection.load(self.root, self.writer, self.verbose)
-        coll.loadmeta()
-        coll.applymeta()
+        if not self.load():
+            return False
 
-        exportdir = os.path.join(coll.datadir, "export")
+        self.collection.loadmeta()
+        self.collection.applymeta()
+
+        exportdir = os.path.join(self.collection.datadir, "export")
         if not os.path.isdir(exportdir):
             os.makedirs(exportdir)
 
@@ -1162,7 +1193,7 @@ class ExportAction(Action):
 
         with md5stream:
             with infostream:
-                self._handle_directory(coll.rootnode, streams)
+                self._handle_directory(self.collection.rootnode, streams)
 
     def _handle_directory(self, node, streams):
         if self.verbose:
@@ -1254,28 +1285,29 @@ class CheckMetaAction(Action):
     ACTION_DESC = "Check metadata, dependencies, etc"
 
     def run(self):
-        coll = Collection.load(self.root, self.writer, self.verbose)
-        coll.loadmeta()
-        coll.applymeta()
+        if not self.load():
+            return False
+        self.collection.loadmeta()
+        self.collection.applymeta()
 
         status = True
-        if not self._checkdeps(coll):
+        if not self._checkdeps():
             status = False
 
-        if not self._checkmeta_used(coll):
+        if not self._checkmeta_used():
             status = False
 
         return status
 
-    def _checkdeps(self, coll):
+    def _checkdeps(self):
         """ Check the dependencies. """
 
         # First gather all known packages that are actaully attached to a node
         packages = {}
-        self._checkdeps_walk_collect(coll.rootnode, packages)
+        self._checkdeps_walk_collect(self.collection.rootnode, packages)
 
         # Next check all dependencies from the nodes have a package to satisfy
-        return self._checkdeps_walk(coll.rootnode, packages)
+        return self._checkdeps_walk(self.collection.rootnode, packages)
 
     def _checkdeps_walk_collect(self, node, packages):
         for meta in node.meta:
@@ -1352,8 +1384,8 @@ class CheckMetaAction(Action):
         else:
             return 0
 
-    def _checkmeta_used(self, coll):
-        for meta in coll.allmeta:
+    def _checkmeta_used(self):
+        for meta in self.collection.allmeta:
             if not meta.users:
                 self.writer.stdout.status(meta.node.prettypath, "UNUSEDMETA", meta.name)
 
@@ -1408,11 +1440,18 @@ class FindTagAction(Action):
         )
 
     def run(self):
-        coll = Collection.load(self.root, self.writer, self.verbose)
-        coll.loadmeta()
-        coll.applymeta()
+        if not self.load():
+            return False
 
-        return self._handle_node(coll.rootnode)
+        self.collection.loadmeta()
+        self.collection.applymeta()
+
+        node = self.find_node(self.subpath)
+        if node is None:
+            self.writer.stderr.status(self.subpath, "NONODE")
+            return False
+
+        return self._handle_node(node)
 
     def _handle_node(self, node):
         status = False
@@ -1463,11 +1502,18 @@ class FindDescAction(Action):
         )
 
     def run(self):
-        coll = Collection.load(self.root, self.writer, self.verbose)
-        coll.loadmeta()
-        coll.applymeta()
+        if not self.load():
+            return False
 
-        return self._handle_node(coll.rootnode)
+        node = self.find_node(self.subpath)
+        if node is None:
+            self.writer.stderr.status(self.subpath, "NONODE")
+            return False
+
+        self.collection.loadmeta()
+        self.collection.applymeta()
+
+        return self._handle_node(node)
 
     def _handle_node(self, node):
         status = False
