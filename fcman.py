@@ -970,6 +970,8 @@ class UpdateAction(Action):
     @classmethod
     def add_arguments(cls, parser):
         super(UpdateAction, cls).add_arguments(parser)
+        parser.add_argument("-f", "--force", dest="force", default=False,
+            action="store_true", help="Always update the checksum.")
         parser.add_argument("path", nargs="?", default=".", help="Path to update")
 
     def run(self):
@@ -1008,7 +1010,7 @@ class UpdateAction(Action):
     def handle_file(self, node):
         stat = os.stat(node.path)
 
-        if abs(node.timestamp - stat.st_mtime) > TIMEDIFF or node.size != stat.st_size or node.checksum == "":
+        if self.options.force or abs(node.timestamp - stat.st_mtime) > TIMEDIFF or node.size != stat.st_size or node.checksum == "":
             if self.verbose:
                 self.writer.stdout.status(node.prettypath, 'PROCESSING')
             node.checksum = node.calc_checksum()
