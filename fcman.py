@@ -88,6 +88,7 @@ class StreamWriter(object):
         self._stream.write(self._indent_level * self._indent_text)
         self._stream.write(line)
         self._stream.write("\n")
+        self._stream.flush()
 
 
 class LogWriter(StreamWriter):
@@ -1675,7 +1676,7 @@ class VerboseChecker(object):
         except ImportError:
             pass
 
-    def _signal(self):
+    def _signal(self, sig, stack):
         self._signalled = True
 
     def __bool__(self):
