@@ -61,7 +61,8 @@ pattern=fsglob
 ; If the pattern "FILEVERSION" is found in a part, it is translated such that
 ; it will match repeading digits 0-9 and "." and be used as the version of the
 ; file.   If FILEVERSION is found in more than one segment, only the last
-; segment will be used to determine the file version.
+; segment will be used to determine the file version. Multiple patterns can
+; be split by a comma.
 
 autoname=name
 ; Automatically add additional provides items to nodes that match the pattern.

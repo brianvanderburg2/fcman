@@ -7,7 +7,7 @@
 __author__ = "Brian Allen Vanderburg II"
 __copyright__ = "Copyright (C) 2013-2018 Brian Allen Vanderburg II"
 __license__ = "MIT License"
-__version__ = "20181110.1"
+__version__ = "20181111.1"
 
 
 # {{{1 Imports
@@ -526,20 +526,22 @@ class Collection(object):
         """ Apply meta information to matching nodes. """
         for meta in self.allmeta:
             parent = meta.node.parent
-            pattern = meta.pattern
+            patterns = meta.pattern.split(",")
+            for pattern in patterns:
+                # Split by "/" and create regex for each path component
+                parts = []
+                for part in pattern.split("/"):
+                    if part == ".":
+                        parts.append(True) # Special flag to indicate the "."
+                    else:
+                        parts.append(fnmatch.translate(part).replace(
+                            "FILEVERSION",
+                            "(?P<version>[0-9\\.]+)"
+                        ))
+                regex = [re.compile(part) if part is not True else True for part in parts]
 
-            # Split by "/" and create regex for each path component
-            parts = [
-                fnmatch.translate(part).replace(
-                    "FILEVERSION",
-                    "(?P<version>[0-9\\.]+)"
-                )
-                for part in pattern.split("/") if len(part)
-            ]
-            regex = [re.compile(part) for part in parts]
-
-            # Recursively apply meta using regex list
-            self._applymeta_walk(parent, regex, meta)
+                # Recursively apply meta using regex list
+                self._applymeta_walk(parent, regex, meta)
 
     def _applymeta_walk(self, node, regex, meta, _version=None):
         """ Apply the metadata to the matching nodes. """
@@ -548,7 +550,7 @@ class Collection(object):
             return
 
         # Check if the meta applies to this directory
-        if len(regex) == 1 and regex[0].match("."):
+        if len(regex) == 1 and regex[0] is True:
             newmeta = meta.clone()
             node.meta.append(newmeta)
             meta.users.append(node)
