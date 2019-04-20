@@ -60,6 +60,15 @@ TIMEDIFF = 2
 NS_COLLECTION = "{urn:mrbavii.fcman:collection}"
 
 
+class Error(Exception):
+    """ A base exception for the application. """
+
+    def __init__(message, retcode=-1):
+        Exception.__init__(message)
+        self.message = message
+        self.retcode = retcode
+
+
 class StreamWriter(object):
     """ Write to a given stream. """
 
@@ -122,10 +131,14 @@ class LogWriter(StreamWriter):
         if check != self._last:
             self._last = check
             if isinstance(path, (list, tuple)):
-                path = "./" + "/".join(path)
+                path = "/" + "/".join(path)
+            elif isinstance(path, Node):
+                path = path.prettypath
             self.writeln(status + ":" + path)
 
-        if msg:
+        if msg is not None:
+            if isinstance(msg, Node):
+                msg = msg.prettypath
             with self.indent():
                 self.writeln("> " + msg)
 
@@ -178,13 +191,9 @@ class Node(object):
 
     @property
     def prettypath(self):
-        """ Return the relative path of the node under root. Each segment is
+        """ Return the path of the node under root. Each segment is
             separated by a forward slash. """
-        if self.pathlist:
-            return "./" + "/".join(self.pathlist)
-        else:
-            return "."
-
+        return "/" + "/".join(self.pathlist)
 
     # Load and save meta
     def _loadmeta(self, xml):
@@ -300,10 +309,6 @@ class Node(object):
         assert self.parent.children[self.name] is self
         self.parent.children.pop(self.name)
         self.parent = None
-
-        # If metadata is loaded (unlikely if this method is being called),
-        # then some metadata may still point to this node.  Since the
-        # application is a run and exit, no point release all the references
 
         return True
 
@@ -458,58 +463,73 @@ class RootDirectory(Directory):
 class Collection(object):
     """ This is the collection object. """
 
-    def __init__(self, root, datadir=None, readonly=False):
+    def __init__(self, root):
         """ Initialize the collection with the root of the collection. """
 
-        self.root = root
-        self.readonly = readonly
+        self.root = os.path.normpath(root) if root is not None else None
+        self.autoroot = "."
         self.rootnode = RootDirectory(self)
 
-        if datadir is None:
-            self.datadir = os.path.join(root, "_collection")
-        else:
-            self.datadir = datadir
+    def normalize(self, path):
+        """ Normalize an external path to be relative to the collection root. """
+        if path is None:
+            return None
 
-        self._filename = os.path.join(self.datadir, 'collection.xml')
-        self._backupname = os.path.join(
-            self.datadir, 'backups', 'collection.xml.' +
-            time.strftime("%Y%m%d%H%M%S")
-        )
+        # Find the relative path, then apply corrections
+        # relpath already normalizes "." and ".."
+        relpath = os.path.relpath(path, self.root)
+
+        # relpath should be a subpath (or ".") of root
+        if os.path.isabs(relpath):
+            return None
+
+        parts = []
+        for i in relpath.replace(os.sep, "/").split("/"):
+            if i in ("..", os.pardir): # Shouldn't be in relpath from root to item
+                return None
+
+            if i == ".": # Skip "."
+                continue
+
+            if i:
+                parts.append(i)
+
+        return parts
 
     @classmethod
-    def load(cls, root):
+    def load(cls, filename, root=None):
         """ Function to load a file and return the collection object. """
         coll = Collection(root)
 
-        tree = ET.parse(coll._filename)
-        root = tree.getroot()
-        if not root.tag in ('collection', NS_COLLECTION + 'collection'):
+        tree = ET.parse(filename)
+        rootnode = tree.getroot()
+        if not rootnode.tag in ('collection', NS_COLLECTION + 'collection'):
             return None
 
+        coll.autoroot = rootnode.get("root", ".").replace("/", os.sep)
+        if root is None:
+            coll.root = os.path.normpath(os.path.join(
+                os.path.dirname(filename),
+                coll.autoroot
+            ))
+
         # Load the root node
-        coll.rootnode = RootDirectory.load(coll, root)
+        coll.rootnode = RootDirectory.load(coll, rootnode)
 
         return coll
 
-    def save(self):
+    def save(self, filename):
         """ Save the collection to XML. """
-        if self.readonly:
-            raise Error("Attempt to save read-only collection {0}", self._filename)
-
         root = ET.Element('collection')
-        self.rootnode.save(root)
+        if self.autoroot:
+            root.set("root", self.autoroot.replace(os.sep, "/"))
+        else:
+            root.set("root", ".")
 
+        self.rootnode.save(root)
         tree = ET.ElementTree(root)
 
-        for i in (os.path.dirname(j) for j in (self._backupname, self._filename)):
-            if not os.path.isdir(i):
-                os.makedirs(i)
-
-        # Move new filename over
-        if os.path.exists(self._filename):
-            if os.path.exists(self._backupname):
-                os.unlink(self._backupname)
-            os.rename(self._filename, self._backupname)
+        # External code should perform the backup?
 
         # We don't need to use codecs here as ElementTree actually does the
         # encoding based on the enconding= parameter, unlike xml.dom.minidom
@@ -518,7 +538,7 @@ class Collection(object):
         else:
             kwargs = {}
 
-        tree.write(self._filename, encoding='utf-8', xml_declaration=True,
+        tree.write(filename, encoding='utf-8', xml_declaration=True,
                    method='xml', **kwargs)
 
 
@@ -530,13 +550,11 @@ class Action(object):
     ACTION_NAME = None
     ACTION_DESC = ""
 
-    def __init__(self, options, writer, verbose):
-        self.collection = None
-        self.root = os.getcwd() # A default, may be changed in child classes
-        self.subpath = []
-        self.options = options
-        self.writer = writer
-        self.verbose = verbose
+    def __init__(self, program):
+        self.program = program
+        self.options = program.options
+        self.writer = program.writer
+        self.verbose = program.verbose
 
     def run(self):
         raise NotImplementedError
@@ -556,74 +574,11 @@ class Action(object):
     def parse_arguments(cls, options):
         pass
 
-    def find_root(self):
-        """ Find the root directory and set self.root, self.subpath.
-            Return True on success or False on failure. """
-
-        # We look for _collection/collection.xml
-        head = os.getcwd()
-        subpath = []
-
-        while head:
-            if os.path.isfile(os.path.join(head, "_collection", "collection.xml")):
-                self.root = head
-                self.subpath = subpath
-                return True
-
-            (head, tail) = os.path.split(head)
-            if tail:
-                subpath.insert(0, tail)
-            else:
-                break
-
-        return False
-
-    def load(self, find=None):
-        if find is None:
-            find = self.options.walk
-
-        if find and not self.find_root():
-            self.writer.stderr.status(os.getcwd(), "NOROOT")
-            return False
-
-        if self.verbose:
-            self.writer.stdout.status(self.root, "ROOT")
-            if self.subpath:
-                self.writer.stdout.status(self.subpath, "SUBPATH")
-
-        self.collection = Collection.load(self.root)
-        return True
-
     def normalize_path(self, path):
-        """ Normalize a path and turn the normalized result.
-            Return None if the path cannot be normalized. """
-
-        if path is None or len(path) == 0:
-            return self.subpath
-
-        if not isinstance(path, (list, tuple)):
-            path = [i for i in path.replace(os.sep, "/").split("/")]
-
-        if path[0] == "": # started with "/"
-            result = []
-            path = path[1:]
-        else:
-            result = list(self.subpath)
-
-
-        for part in path:
-            if len(part) == 0:
-                continue
-            elif part == ".":
-                continue
-            elif part == "..":
-                if len(result):
-                    result.pop()
-                else:
-                    self.writer.stderr.status(path, "BADPATH")
-                    return None
-            else:
-                result.append(part)
+        """ Normalize a path. """
+        result = self.program.collection.normalize(path)
+        if result is None:
+            self.writer.stderr.status(path,"BADPATH")
 
         return result
 
@@ -632,7 +587,7 @@ class Action(object):
             Return is (node, remaining_path) """
 
         path = list(path)
-        node = self.collection.rootnode
+        node = self.program.collection.rootnode
 
         while len(path):
             if not isinstance(node, Directory):
@@ -655,16 +610,25 @@ class Action(object):
         return node if not remaining_path else None
 
 
-class CreateAction(Action):
+class InitAction(Action):
+    """ Initialize a collection. """
 
-    ACTION_NAME = "create"
-    ACTION_DESC = "Create a collection"
+    ACTION_NAME = "init"
+    ACTION_DESC = "Initialize a collection."
 
     def run(self):
-        # we always create in the current directory
-        # TODO: don't create if already exists
-        self.collection = Collection(self.root, self.writer, self.verbose)
-        self.collection.save()
+        # This is a special action, collection is not loaded at this point
+        # can't use self.program.file or self.program.collection
+        coll = Collection(".")
+        if self.options.root is not None:
+            coll.autoroot = self.options.root
+
+        if os.path.exists(self.options.file):
+            self.writer.stderr.status(self.options.file, "EXISTS")
+            return False
+
+        self.writer.stdout.status(self.options.file, "INIT")
+        coll.save(self.options.file)
         return True
 
 
@@ -684,9 +648,6 @@ class CheckAction(Action):
         parser.add_argument("path", nargs="?", default=".", help="Path to " + cls.ACTION_NAME)
 
     def run(self):
-        if not self.load():
-            return False
-
         path = self.normalize_path(self.options.path)
         if path is None:
             return False
@@ -829,9 +790,6 @@ class UpdateAction(Action):
         parser.add_argument("path", nargs="?", default=".", help="Path to update")
 
     def run(self):
-        if not self.load():
-            return False
-
         path = self.normalize_path(self.options.path)
         if path is None:
             return False
@@ -852,7 +810,7 @@ class UpdateAction(Action):
         else:
             return False
 
-        self.collection.save()
+        self.program.collection.save(self.program.file)
         return True
 
     def handle_symlink(self, node):
@@ -929,9 +887,6 @@ class MoveAction(Action):
         parser.add_argument("parent", help="The path of the new parent.")
 
     def run(self):
-        if not self.load():
-            return False
-
         nodepath = self.normalize_path(self.options.path)
         parentpath = self.normalize_path(self.options.parent)
 
@@ -953,8 +908,10 @@ class MoveAction(Action):
         if not node.reparent(parent):
             self.writer.stderr.status(nodepath, "NOMOVE")
             return False
+        else:
+            self.writer.stdout.status(nodepath, "MOVE", node)
 
-        self.collection.save()
+        self.program.collection.save(self.program.file)
         return True
 
 
@@ -972,9 +929,6 @@ class RenameAction(Action):
         parser.add_argument("name", help="The name to rename to.")
 
     def run(self):
-        if not self.load():
-            return False
-
         nodepath = self.normalize_path(self.options.path)
         if nodepath is None:
             return False
@@ -987,8 +941,10 @@ class RenameAction(Action):
         if not node.rename(self.options.name):
             self.writer.stderr.status(nodepath, "NORENAME")
             return False
+        else:
+            self.writer.stdout.status(nodepath, "RENAME", node)
 
-        self.collection.save()
+        self.program.collection.save(self.program.file)
         return True
 
 
@@ -1005,9 +961,6 @@ class DeleteAction(Action):
         parser.add_argument("path", help="The path of the node to delete.")
 
     def run(self):
-        if not self.load():
-            return False
-
         nodepath = self.normalize_path(self.options.path)
         if nodepath is None:
             return False
@@ -1020,8 +973,10 @@ class DeleteAction(Action):
         if not node.delete():
             self.writer.stderr.status(nodepath, "NODELETE")
             return False
+        else:
+            self.writer.stdout.status(nodepath, "DELETE")
 
-        self.collection.save()
+        self.program.collection.save(self.program.file)
         return True
 
 
@@ -1041,9 +996,6 @@ class AddAction(UpdateAction):
         parser.add_argument("path", help="The file system item to add.")
 
     def run(self):
-        if not self.load():
-            return False
-
         path = self.normalize_path(self.options.path)
         if path is None:
             return False
@@ -1077,7 +1029,8 @@ class AddAction(UpdateAction):
         else:
             return False
 
-        self.collection.save()
+        # TODO: backup
+        self.program.collection.save(self.program.file)
         return True
 
     def _handle_parents(self, node, parts):
@@ -1117,20 +1070,14 @@ class AddAction(UpdateAction):
 
 class ExportAction(Action):
     """ Dump information about the collection. """
+    # TODO: need option to control where files are generated.
 
     ACTION_NAME = "export"
     ACTION_DESC = "Export information"
 
     def run(self):
-        if not self.load():
-            return False
-
-        exportdir = os.path.join(self.collection.datadir, "export")
-        if not os.path.isdir(exportdir):
-            os.makedirs(exportdir)
-
-        md5file = os.path.join(exportdir, "md5sums.txt")
-        infofile = os.path.join(exportdir, "info.txt")
+        md5file = os.path.join(self.program.collection.root, "md5sums.txt")
+        infofile = os.path.join(self.program.collection.root, "info.txt")
 
         md5stream = TextFile(md5file)
         infostream = TextFile(infofile)
@@ -1139,7 +1086,7 @@ class ExportAction(Action):
 
         with md5stream:
             with infostream:
-                self._handle_directory(self.collection.rootnode, streams)
+                self._handle_directory(self.program.collection.rootnode, streams)
 
     def _handle_directory(self, node, streams):
         if self.verbose:
@@ -1176,7 +1123,8 @@ class ExportAction(Action):
         streams[1].writeln("Modified: {0}".format(node.timestamp))
 
         if node.checksum:
-            streams[0].writeln(node.checksum + ' *' + node.prettypath[2:])
+            # skip the "/" at the beginning
+            streams[0].writeln(node.checksum + ' *' + node.prettypath[1:])
         else:
             self.writer.stdout.status(node.prettypath, "MISSING CHECKSUM")
 
@@ -1346,37 +1294,22 @@ class UpdateMetaAction(Action):
         self._allmeta = []
 
     def run(self):
-        if not self.load():
+        if not self.loadmeta(self.program.collection.rootnode):
             return False
 
-        if not self.loadmeta():
-            return False
-
-        self.resetmeta(self.collection.rootnode)
+        self.resetmeta(self.program.collection.rootnode)
         if not self.applymeta():
             return False
 
-        self.collection.save()
+        self.program.collection.save(self.program.file)
 
         for meta in self._allmeta:
             if not meta.users:
                 self.writer.stdout.status(meta.node.prettypath, "UNUSEDMETA", meta.name)
 
         return True
-    
-    def loadmeta(self):
-        """ Walk over each directory for a "fcmeta.ini" file """
 
-        status = True
-
-        # First we load all the meta files
-        node = self.collection.rootnode
-        if not self._loadmeta_walk(node):
-            status = False
-
-        return status
-
-    def _loadmeta_walk(self, node):
+    def loadmeta(self, node):
         status = True
         for i in sorted(node.children):
             child = node.children[i]
@@ -1386,23 +1319,23 @@ class UpdateMetaAction(Action):
                     status = False
 
             elif isinstance(child, Directory):
-                self._loadmeta_walk(child)
+                self.loadmeta(child)
 
         return status
 
     def _loadmeta(self, node):
         if self.verbose:
-            self.writer.stdout.status(node.prettypath, 'LOADING')
+            self.writer.stdout.status(node, 'LOADING')
 
         config = SafeConfigParser()
         read = config.read(node.path)
         if not read:
-            self.writer.stderr.status(node.prettypath, 'LOAD ERROR')
+            self.writer.stderr.status(node, 'LOAD ERROR')
             return False
 
         # Should at least have fcmeta section
         if not config.has_section("fcman:fcmeta"):
-            self.writer.stderr.status(node.prettypath, 'NOTMETAINFO')
+            self.writer.stderr.status(node, 'NOTMETAINFO')
             return False
 
         sections = config.sections()
@@ -1538,9 +1471,6 @@ class CheckMetaAction(Action):
     ACTION_DESC = "Check metadata, dependencies, etc"
 
     def run(self):
-        if not self.load():
-            return False
-
         status = True
         if not self._checkdeps():
             status = False
@@ -1552,10 +1482,10 @@ class CheckMetaAction(Action):
 
         # First gather all known packages that are actaully attached to a node
         packages = {}
-        self._checkdeps_walk_collect(self.collection.rootnode, packages)
+        self._checkdeps_walk_collect(self.program.collection.rootnode, packages)
 
         # Next check all dependencies from the nodes have a package to satisfy
-        return self._checkdeps_walk(self.collection.rootnode, packages)
+        return self._checkdeps_walk(self.program.collection.rootnode, packages)
 
     def _checkdeps_walk_collect(self, node, packages):
         for meta in node.meta:
@@ -1658,30 +1588,30 @@ class CheckMetaAction(Action):
             return 0
 
 
-class UpgradeAction(Action):
-    """ Perform upgrade of collection. """
-
-    ACTION_NAME = "upgrade"
-    ACTION_DESC = "Upgrade collection information. """
-
-    def run(self):
-        if not self._upgrade1():
-            return False
-
-        return True
-
-    def _upgrade1(self):
-        orig_filename = os.path.join(self.root, "collection.xml")
-        new_filename = os.path.join(self.root, "_collection", "collection.xml")
-
-        if not os.path.exists(new_filename) and os.path.exists(orig_filename):
-            self.writer.stdout.status("./", "UPGRADE", "Moving collection.xml to _collection/collection.xml")
-
-            dirname = os.path.join(self.root, "_collection")
-            if not os.path.isdir(dirname):
-                os.makedirs(dirname)
-            os.rename(orig_filename, new_filename)
-            return True
+#class UpgradeAction(Action):
+#    """ Perform upgrade of collection. """
+#
+#    ACTION_NAME = "upgrade"
+#    ACTION_DESC = "Upgrade collection information. """
+#
+#    def run(self):
+#        if not self._upgrade1():
+#            return False
+#
+#        return True
+#
+#    def _upgrade1(self):
+#        orig_filename = os.path.join(self.root, "collection.xml")
+#        new_filename = os.path.join(self.root, "_collection", "collection.xml")
+#
+#        if not os.path.exists(new_filename) and os.path.exists(orig_filename):
+#            self.writer.stdout.status("./", "UPGRADE", "Moving collection.xml to _collection/collection.xml")
+#
+#            dirname = os.path.join(self.root, "_collection")
+#            if not os.path.isdir(dirname):
+#                os.makedirs(dirname)
+#            os.rename(orig_filename, new_filename)
+#            return True
 
 
 class FindTagAction(Action):
@@ -1708,12 +1638,9 @@ class FindTagAction(Action):
         )
 
     def run(self):
-        if not self.load():
-            return False
-
-        node = self.find_node(self.subpath)
+        node = self.find_node(self.program.collection.normalize(os.curdir))
         if node is None:
-            self.writer.stderr.status(self.subpath, "NONODE")
+            self.writer.stderr.status(self.program.cwd, "BADPATH")
             return False
 
         return self._handle_node(node)
@@ -1767,12 +1694,9 @@ class FindDescAction(Action):
         )
 
     def run(self):
-        if not self.load():
-            return False
-
-        node = self.find_node(self.subpath)
+        node = self.find_node(self.program.collection.normalize(os.curdir))
         if node is None:
-            self.writer.stderr.status(self.subpath, "NONODE")
+            self.writer.stderr.status(self.program.cwd, "BADPATH")
             return False
 
         return self._handle_node(node)
@@ -1807,28 +1731,6 @@ class FindDescAction(Action):
 
 # {{{1 Program entry point
 
-def create_arg_parser():
-    parser = argparse.ArgumentParser()
-
-    # Base arguments
-    parser.add_argument("-v", "--verbose", dest="verbose", default=False, action="store_true")
-    parser.add_argument("-w", "--walk", dest="walk", default=False, action="store_true")
-    parser.add_argument("-x", "--no-recurse", dest="recurse", default=True, action="store_false")
-    parser.set_defaults(action=None)
-
-    # Add commands
-    commands = list(filter(lambda cls: cls.ACTION_NAME is not None, Action.get_subclasses()))
-    commands.sort(key=lambda cls: cls.ACTION_NAME)
-    subparsers = parser.add_subparsers()
-
-    for i in commands:
-        subparser = subparsers.add_parser(i.ACTION_NAME, help=i.ACTION_DESC)
-        i.add_arguments(subparser)
-        subparser.set_defaults(action=i)
-
-    return parser
-
-
 class VerboseChecker(object):
 
     def __init__(self, verbose):
@@ -1852,24 +1754,132 @@ class VerboseChecker(object):
     __nonzero__ = __bool__
 
 
-def main():
-    # Check arguments
-    parser = create_arg_parser()
-    options = parser.parse_args()
-    action = options.action
-    if action is None:
-        parser.print_help()
-        parser.exit()
-    action.parse_arguments(options)
+class Program(object):
+    """ The main program object. """
 
-    verbose = VerboseChecker(options.verbose)
-    writer = Writer()
+    def __init__(self):
+        """ Initialize the program object. """
+        self.collection = None
+        self.cwd = None
+        self.file = None # The actual file loaded (options.file is the file to search for)
+        self.options = None
+        self.verbose = None
+        self.writer = None
 
 
-    # Do stuff
-    if not action(options, writer, verbose).run():
-        return -1
+    def create_arg_parser(self):
+        parser = argparse.ArgumentParser()
+
+        # Base arguments
+        parser.add_argument("-C", "--chdir", dest="chdir", default=None)
+        parser.add_argument("-f", "--file", dest="file", default="fcman.xml")
+        parser.add_argument("-r", "--root", dest="root", default=None)
+        parser.add_argument("-v", "--verbose", dest="verbose", default=False, action="store_true")
+        parser.add_argument("-w", "--walk", dest="walk", default=False, action="store_true")
+        parser.add_argument("-x", "--no-recurse", dest="recurse", default=True, action="store_false")
+        parser.set_defaults(action=None)
+
+        # Add commands
+        commands = list(filter(lambda cls: cls.ACTION_NAME is not None, Action.get_subclasses()))
+        commands.sort(key=lambda cls: cls.ACTION_NAME)
+        subparsers = parser.add_subparsers()
+
+        # First add our special "init" command
+        subparser = subparsers.add_parser("init", help="Initialize a collection")
+        subparser.set_defaults(action="init")
+
+        # Now the rest
+        for i in commands:
+            subparser = subparsers.add_parser(i.ACTION_NAME, help=i.ACTION_DESC)
+            i.add_arguments(subparser)
+            subparser.set_defaults(action=i)
+
+        return parser
+
+    def main(self):
+        # Arguments
+        parser = self.create_arg_parser()
+        self.options = options = parser.parse_args()
+
+        # Handle some objects
+        self.verbose = verbose = VerboseChecker(options.verbose)
+        self.writer = writer = Writer()
+
+        # Handle current directory
+        if options.chdir:
+            if verbose:
+                writer.stdout.status(options.chdir,"CHDIR")
+            os.chdir(options.chdir)
+
+        self.cwd = os.getcwd()
+
+        # Handle action
+        action = options.action
+        if action is None:
+            parser.print_help()
+            parser.exit()
+
+        if action.ACTION_NAME != "init":
+            # Load the collection if needed
+            self.file = self.find_file()
+            action.parse_arguments(options)
+
+            if not self.file:
+                writer.stderr.status("Collection not found", "NOFILE")
+                return -1
+            elif verbose:
+                writer.stdout.status(self.file, "COLLECTION")
+
+            self.collection = Collection.load(self.file, self.options.root)
+            if verbose:
+                writer.stdout.status(self.collection.root, "ROOT")
+
+        if not action(self).run():
+            return -1
+
+        return 0
+
+    def find_file(self):
+        """ Use our options to find file. """
+        if not self.options.walk:
+            # In this mode, file directly specified
+            filename = os.path.normpath(self.options.file)
+            if os.path.isfile(filename):
+                return filename
+            return None
+
+        # In walk mode, walk up the directory to find the file
+        head = self.cwd
+        while head:
+            filename = os.path.join(head, self.options.file)
+            if os.path.isfile(filename):
+                return os.path.relpath(filename) # relpath to keep it pretty
+
+            (head, tail) = os.path.split(head)
+            if not tail:
+                break
+
+        return None
+
+    def action_init(self):
+        """ Initialize the collection. """
+        
+        # self.root not set at this point, only the self.options.root
+        coll = Collection(".")
+        if self.options.root is not None:
+            coll.autoroot = self.options.root
+
+        if os.path.exists(self.options.file):
+            self.writer.stderr.status(self.options.file, "EXISTS")
+            return -1
+
+        if self.verbose:
+            self.writer.stderr.status(self.options.file, "INIT")
+        coll.save(self.options.file)
+
+        return 0
+
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(Program().main())
 
