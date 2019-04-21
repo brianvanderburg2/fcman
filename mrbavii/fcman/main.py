@@ -3,6 +3,10 @@
 # pylint: disable=too-many-lines,missing-docstring
 """ File collection management utility. """
 
+__author__ = "Brian Allen Vanderburg II"
+__copyright__ = "Copyright 2000-2019"
+__license__ = "MIT"
+
 # {{{1 Meta information
 
 __author__ = "Brian Allen Vanderburg II"
@@ -1929,5 +1933,5 @@ class Program(object):
         return None
 
 
-if __name__ == '__main__':
+def main():
     sys.exit(Program().main())
