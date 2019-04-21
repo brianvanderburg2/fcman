@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # vim: foldmethod=marker foldmarker={{{,}}}, foldlevel=0
+# pylint: disable=too-many-lines,missing-docstring
 """ File collection management utility. """
 
 # {{{1 Meta information
@@ -19,6 +20,7 @@ __version__ = "20190303.1"
 # stdout is used other times
 # - since fcman is essentially a status program, status such as missing or
 #   new items, bad dependencies, etc, should go to stdout
+# - in verbose mode, non-error verbose information goes to stdout
 
 
 # Still need to add better error handling and printing
@@ -34,17 +36,11 @@ import io
 import os
 import re
 import sys
-import time
 
 try:
-    from lxml import etree as ET
-    PRETTY_PRINT = True
+    from xml.etree import cElementTree as ET
 except ImportError:
-    PRETTY_PRINT = False
-    try:
-        from xml.etree import cElementTree as ET
-    except ImportError:
-        from xml.etree import ElementTree as ET
+    from xml.etree import ElementTree as ET
 
 # {{{1 Checks
 
@@ -56,11 +52,9 @@ if sys.version_info[0:2] < (3, 2):
 # Time difference to consider a file's timestamp changed
 TIMEDIFF = 2
 
-# Use namespaces for reading, but now only write without namespaces
-NS_COLLECTION = "{urn:mrbavii.fcman:collection}"
-
 
 def splitval(val):
+    """ Split a string into a list of non-empty values by comman or whitespace. """
     val = ''.join(map(lambda ch: ',' if ch in " \t\r\n" else ch, val))
     return list(filter(lambda i: len(i) > 0, val.split(',')))
 
@@ -148,14 +142,14 @@ class TextFile(StreamWriter):
         StreamWriter.__init__(self, stream)
 
 
-class Writer(object):
+class StdStreamWriter(object):
     """ Wrapper for stdout and stderr streams. """
 
     def __init__(self):
         """ Initialize teh writer. """
-
         self.stdout = LogWriter(sys.stdout)
         self.stderr = LogWriter(sys.stderr)
+
 
 # {{{1 Collection classes
 
@@ -208,6 +202,7 @@ class Node(object):
     @classmethod
     def load(cls, parent, xml):
         """ Load the node from the XML and load metadata from that. """
+        # pylint: disable=protected-access
         node = cls._load(parent, xml)
         node._loadmeta(xml)
         node._post_load()
@@ -319,11 +314,8 @@ class Node(object):
         return True
 
     def _update_pathlist(self):
-        """ Recursively update the path list. """
+        """ Update the path list when node is renamed or moved. """
         self.pathlist = self.parent.pathlist + (self.name,)
-        if isinstance(self, Directory):
-            for name in self.children:
-                self.children[name]._update_pathlist()
 
 
 class Symlink(Node):
@@ -422,11 +414,11 @@ class Directory(Node):
         )
 
         for child in xml:
-            if child.tag in ('symlink', NS_COLLECTION + 'symlink'):
+            if child.tag == 'symlink':
                 Symlink.load(dir, child)
-            elif child.tag in ('directory', NS_COLLECTION + 'directory'):
+            elif child.tag == 'directory':
                 Directory.load(dir, child)
-            elif child.tag in ('file', NS_COLLECTION + 'file'):
+            elif child.tag == 'file':
                 File.load(dir, child)
 
         return dir
@@ -475,6 +467,12 @@ class Directory(Node):
     def exists(self):
         """ Test if the directory exists. """
         return os.path.isdir(self.path) and not os.path.islink(self.path)
+
+    def _update_pathlist(self):
+        """ Update the path list recursively for children. """
+        Node._update_pathlist(self)
+        for name in self.children:
+            self.children[name]._update_pathlist()
 
 
 class RootDirectory(Directory):
@@ -529,7 +527,7 @@ class Collection(object):
 
         tree = ET.parse(filename)
         rootnode = tree.getroot()
-        if not rootnode.tag in ('collection', NS_COLLECTION + 'collection'):
+        if not rootnode.tag == 'collection':
             return None
 
         coll.autoroot = rootnode.get("root", ".").replace("/", os.sep)
@@ -555,18 +553,29 @@ class Collection(object):
         self.rootnode.save(root)
         tree = ET.ElementTree(root)
 
-        # External code should perform the backup?
+        # Prettify the output ourselves, similar to some code at stack overflow
+        queue = [(0, root)]
+        while queue:
+            (level, element) = queue.pop(0)
+            children = [(level + 1, child) for child in list(element)]
+            if children:
+                # Child open
+                element.text = "\n" + " " * (level + 1)
+            if queue and queue[0][0] == level:
+                # sibling open
+                element.tail = "\n" + " " * queue[0][0]
+            else:
+                # no siblings at same level, parent close
+                element.tail = "\n" + " " * (level - 1)
+
+            queue[0:0] = children
+
+        # TODO: handle backup
 
         # We don't need to use codecs here as ElementTree actually does the
         # encoding based on the enconding= parameter, unlike xml.dom.minidom
-        if PRETTY_PRINT:
-            kwargs = {"pretty_print": True}
-        else:
-            kwargs = {}
-
         tree.write(filename, encoding='utf-8', xml_declaration=True,
-                   method='xml', **kwargs)
-
+                   method='xml')
 
 # {{{1 Actions
 
@@ -604,7 +613,7 @@ class Action(object):
         """ Normalize a path. """
         result = self.program.collection.normalize(path)
         if result is None:
-            self.writer.stderr.status(path,"BADPATH")
+            self.writer.stderr.status(path, "BADPATH")
 
         return result
 
@@ -848,7 +857,10 @@ class UpdateAction(Action):
     def handle_file(self, node):
         stat = os.stat(node.path)
 
-        if self.options.force or abs(node.timestamp - stat.st_mtime) > TIMEDIFF or node.size != stat.st_size or node.checksum == "":
+        if (self.options.force or
+                abs(node.timestamp - stat.st_mtime) > TIMEDIFF or
+                node.size != stat.st_size or node.checksum == ""):
+
             if self.verbose:
                 self.writer.stdout.status(node.prettypath, 'PROCESSING')
             node.checksum = node.calc_checksum()
@@ -1273,7 +1285,7 @@ class _MetaInfo(object):
                 parts = i.split(":")
                 name = parts[0]
                 minversion = parts[1] if len(parts) > 1 and len(parts[1]) else ""
-                maxversion =  parts[2] if len(parts) > 2 and len(parts[2]) else ""
+                maxversion = parts[2] if len(parts) > 2 and len(parts[2]) else ""
                 meta.meta.add(frozenset((
                     ("type", "depends"),
                     ("name", name),
@@ -1332,7 +1344,7 @@ class UpdateMetaAction(Action):
 
     ACTION_NAME = "updatemeta"
     ACTION_DESC = "Update metadata from fcmeta.ini files into the XML."
-    
+
     def __init__(self, *args, **kwargs):
         Action.__init__(self, *args, **kwargs)
         self._allmeta = []
@@ -1421,7 +1433,7 @@ class UpdateMetaAction(Action):
         """ Find the target the meta shold apply to. """
 
         parts = meta.target.strip().split("/")
-        
+
         # First find the starting node
         if not parts[0]:
             # First part empty, means started with "/"
@@ -1437,18 +1449,18 @@ class UpdateMetaAction(Action):
 
             if part == ".":
                 continue
-            
+
             elif part == "..":
                 if node.parent:
                     node = node.parent
                     continue
-            
+
             elif part in node.children:
                 child = node.children[part]
                 if isinstance(child, Directory):
                     node = child
                     continue
-            
+
             # if we got here, we didn't handle the part
             return None
 
@@ -1528,7 +1540,10 @@ class UpdateMetaAction(Action):
 
         # Log
         if self.verbose:
-            self.writer.stdout.status(node.prettypath, "META", "FROM: {0}:{1}".format(meta.node.prettypath, meta.name))
+            self.writer.stdout.status(
+                node.prettypath,
+                "META", "FROM: {0}:{1}".format(meta.node.prettypath, meta.name)
+            )
             for newmeta in values:
                 self.writer.stdout.status(node.prettypath, "META", str(dict(newmeta)))
 
@@ -1657,31 +1672,6 @@ class CheckMetaAction(Action):
             return 0
 
 
-#class UpgradeAction(Action):
-#    """ Perform upgrade of collection. """
-#
-#    ACTION_NAME = "upgrade"
-#    ACTION_DESC = "Upgrade collection information. """
-#
-#    def run(self):
-#        if not self._upgrade1():
-#            return False
-#
-#        return True
-#
-#    def _upgrade1(self):
-#        orig_filename = os.path.join(self.root, "collection.xml")
-#        new_filename = os.path.join(self.root, "_collection", "collection.xml")
-#
-#        if not os.path.exists(new_filename) and os.path.exists(orig_filename):
-#            self.writer.stdout.status("./", "UPGRADE", "Moving collection.xml to _collection/collection.xml")
-#
-#            dirname = os.path.join(self.root, "_collection")
-#            if not os.path.isdir(dirname):
-#                os.makedirs(dirname)
-#            os.rename(orig_filename, new_filename)
-#            return True
-
 
 class FindTagAction(Action):
     """ Find paths that match specific tags. """
@@ -1809,6 +1799,7 @@ class FindDescAction(Action):
 # {{{1 Program entry point
 
 class VerboseChecker(object):
+    """ A small class whose boolean value depends on verbose or a signal. """
 
     def __init__(self, verbose):
         self._verbose = verbose
@@ -1821,6 +1812,7 @@ class VerboseChecker(object):
             pass
 
     def _signal(self, sig, stack):
+        # pylint: disable=unused-argument
         self._signalled = True
 
     def __bool__(self):
@@ -1845,6 +1837,7 @@ class Program(object):
 
 
     def create_arg_parser(self):
+        """ Create parser for main and actions """
         parser = argparse.ArgumentParser()
 
         # Base arguments
@@ -1870,18 +1863,19 @@ class Program(object):
         return parser
 
     def main(self):
+        """ Run the program. """
         # Arguments
         parser = self.create_arg_parser()
         self.options = options = parser.parse_args()
 
         # Handle some objects
         self.verbose = verbose = VerboseChecker(options.verbose)
-        self.writer = writer = Writer()
+        self.writer = writer = StdStreamWriter()
 
         # Handle current directory
         if options.chdir:
             if verbose:
-                writer.stdout.status(options.chdir,"CHDIR")
+                writer.stdout.status(options.chdir, "CHDIR")
             os.chdir(options.chdir)
 
         self.cwd = os.getcwd()
@@ -1934,25 +1928,6 @@ class Program(object):
 
         return None
 
-    def action_init(self):
-        """ Initialize the collection. """
-        
-        # self.root not set at this point, only the self.options.root
-        coll = Collection(".")
-        if self.options.root is not None:
-            coll.autoroot = self.options.root
-
-        if os.path.exists(self.options.file):
-            self.writer.stderr.status(self.options.file, "EXISTS")
-            return -1
-
-        if self.verbose:
-            self.writer.stderr.status(self.options.file, "INIT")
-        coll.save(self.options.file)
-
-        return 0
-
 
 if __name__ == '__main__':
     sys.exit(Program().main())
-
