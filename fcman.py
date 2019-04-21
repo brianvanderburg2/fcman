@@ -764,7 +764,7 @@ class CheckAction(Action):
         # Check for new items
         for i in sorted(os.listdir(node.path)):
             if not node.ignore(i) and not i in node.children:
-                self.writer.stdout.status(node.prettypath + "/" + i, 'NEW')
+                self.writer.stdout.status(node.prettypath.rstrip("/") + "/" + i, 'NEW')
                 status = False
 
                 # Show new child items
