@@ -1224,7 +1224,7 @@ class ExportAction(Action):
 class _MetaInfo(object):
     """ Represent metadata. """
 
-    def __init__(self, node):
+    def __init__(self, node, options):
         """ Initial state of metadata. """
         self.node = node
         self.users = []
@@ -1233,11 +1233,13 @@ class _MetaInfo(object):
         self.autoname = []
         self.meta = set()
 
+        self.target = options.get("target", ".")
+
 
     @classmethod
-    def load(cls, node, name, config):
+    def load(cls, node, name, config, options):
         """ Load metadata from an INI config section. """
-        meta = _MetaInfo(node)
+        meta = _MetaInfo(node, options)
         meta.name = name
 
         # pattern
@@ -1304,7 +1306,7 @@ class _MetaInfo(object):
             for ignore in ignores:
                 meta.meta.add(frozenset((
                     ("type", "ignore"),
-                    ("ignore", ignore)
+                    ("pattern", ignore)
                 )))
 
         return meta
@@ -1351,17 +1353,32 @@ class UpdateMetaAction(Action):
 
         return True
 
-    def loadmeta(self, node):
+    def loadmeta(self, node, force=False):
         status = True
         for i in sorted(node.children):
             child = node.children[i]
 
             if i == "fcmeta.ini":
-                if not self._loadmeta(child):
-                    status = False
+                # Handle the special name "fcmeta.ini"
+                if isinstance(child, Directory):
+                    # if directory is named fcmeta.ini, all INI files under
+                    # are loaded recursively
+                    if not self.loadmeta(child, True):
+                        status = False
+                else:
+                    # Just load the INI file
+                    if not self._loadmeta(child):
+                        status = False
 
             elif isinstance(child, Directory):
-                self.loadmeta(child)
+                # Not fcmeta.ini, process subdirs with same force setting
+                if not self.loadmeta(child, force):
+                    status = False
+
+            elif force and i.lower().endswith(".ini") and not i[0:1] in (".", "~"):
+                # If force is enabled the load all other INI files as well
+                if not self._loadmeta(child):
+                    status = False
 
         return status
 
@@ -1375,17 +1392,20 @@ class UpdateMetaAction(Action):
             self.writer.stderr.status(node, 'LOAD ERROR')
             return False
 
-        # Should at least have fcmeta section
+        # Should at least have fcmeta options section
         if not config.has_section("fcman:fcmeta"):
             self.writer.stderr.status(node, 'NOTMETAINFO')
             return False
 
+        options = dict(config.items("fcman:fcmeta"))
+
+        # Handle the sections
         sections = config.sections()
         for name in sections:
-            if name == "fcman:fcmeta":
+            if name == "fcman:fcmeta": # Skip options section
                 continue
 
-            meta = _MetaInfo.load(node, name, dict(config.items(name)))
+            meta = _MetaInfo.load(node, name, dict(config.items(name)), options)
             self._allmeta.append(meta)
 
         return True
@@ -1397,10 +1417,54 @@ class UpdateMetaAction(Action):
             for child in node.children:
                 self.resetmeta(node.children[child])
 
+    def find_target(self, meta):
+        """ Find the target the meta shold apply to. """
+
+        parts = meta.target.strip().split("/")
+        
+        # First find the starting node
+        if not parts[0]:
+            # First part empty, means started with "/"
+            node = self.program.collection.rootnode
+            parts = parts[1:]
+        else:
+            node = meta.node.parent
+
+        # Process remaining parts
+        for part in parts:
+            if not part:
+                continue
+
+            if part == ".":
+                continue
+            
+            elif part == "..":
+                if node.parent:
+                    node = node.parent
+                    continue
+            
+            elif part in node.children:
+                child = node.children[part]
+                if isinstance(child, Directory):
+                    node = child
+                    continue
+            
+            # if we got here, we didn't handle the part
+            return None
+
+        # hanlded all parts so must have found the target
+        return node
+
     def applymeta(self):
         """ Apply meta information to matching nodes. """
+        status = True
         for meta in self._allmeta:
-            parent = meta.node.parent
+            parent = self.find_target(meta)
+            if parent is None:
+                self.writer.stderr.status(meta.node, "ERROR BAD TARGET")
+                status = False
+                continue
+
             patterns = meta.pattern.split(",")
             for pattern in patterns:
                 # Split by "/" and create regex for each path component
@@ -1418,7 +1482,7 @@ class UpdateMetaAction(Action):
                 # Recursively apply meta using regex list
                 self._applymeta_walk(parent, regex, meta)
 
-        return True
+        return status
 
     def _applymeta_walk(self, node, regex, meta, _version=None):
         """ Apply the metadata to the matching nodes. """
@@ -1796,10 +1860,6 @@ class Program(object):
         commands = list(filter(lambda cls: cls.ACTION_NAME is not None, Action.get_subclasses()))
         commands.sort(key=lambda cls: cls.ACTION_NAME)
         subparsers = parser.add_subparsers()
-
-        # First add our special "init" command
-        subparser = subparsers.add_parser("init", help="Initialize a collection")
-        subparser.set_defaults(action="init")
 
         # Now the rest
         for i in commands:
