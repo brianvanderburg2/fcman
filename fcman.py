@@ -398,6 +398,7 @@ class Directory(Node):
         """ Initialize the directory node. """
         Node.__init__(self, parent, name)
         self.children = {}
+        self.ignore_patterns = []
 
     @classmethod
     def _load(cls, parent, xml):
@@ -408,6 +409,13 @@ class Directory(Node):
         else:
             name = xml.get('name')
             dir = Directory(parent, name)
+
+        dir.ignore_patterns = list( # Python 3, must convert filter to list right away
+            filter(
+                None,
+                xml.get("ignore", "").split(",")
+            )
+        )
 
         for child in xml:
             if child.tag in ('symlink', NS_COLLECTION + 'symlink'):
@@ -423,6 +431,9 @@ class Directory(Node):
         """ Save the directory node to XML. """
         if not isinstance(self, RootDirectory):
             xml.set('name', self.name)
+
+        if self.ignore_patterns:
+            xml.set("ignore", ",".join(self.ignore_patterns))
 
         for name in sorted(self.children):
             child = self.children[name]
@@ -441,10 +452,7 @@ class Directory(Node):
 
     def ignore(self, name):
         """ Ignore certain files under the directory. """
-        if self.pathlist == ("_collection",):
-            if name.lower() in ("collection.xml", "backups", "export"):
-                return True
-        return False
+        return any(map(lambda i: fnmatch.fnmatch(name, i), self.ignore_patterns))
 
     def exists(self):
         """ Test if the directory exists. """
