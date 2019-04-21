@@ -166,7 +166,7 @@ class Node(object):
         """ Initialize the node with the parent and name. """
         self.name = name
         self.parent = parent
-        self.meta = []
+        self.meta = set()
 
         if parent is not None:
             parent.children[name] = self
@@ -194,15 +194,15 @@ class Node(object):
     # Load and save meta
     def _loadmeta(self, xml):
         """ Load metadata for node. """
-        self.meta = []
+        self.meta = set()
         for child in xml:
             if child.tag == "meta":
-                self.meta.append(dict(child.items()))
+                self.meta.add(frozenset(child.items()))
 
     def _savemeta(self, xml):
         """ Save metadata to xml. """
         for meta in self.meta:
-            ET.SubElement(xml, "meta", attrib=meta)
+            ET.SubElement(xml, "meta", attrib=dict(meta))
 
     # Load and save
     @classmethod
@@ -435,6 +435,7 @@ class Directory(Node):
         """ Update ingnore patterns from metadata. """
         Node._post_load(self)
         for meta in self.meta:
+            meta = dict(meta)
             if meta.get("type") == "ignore":
                 # add ignore meta items to the ignore_patterns_meta list
                 # NOT the ignore_patterns list, so it doesn't get
@@ -1054,7 +1055,6 @@ class AddAction(UpdateAction):
         else:
             return False
 
-        # TODO: backup
         self.program.collection.save(self.program.file)
         return True
 
@@ -1163,7 +1163,7 @@ class ExportAction(Action):
         tags = set()
         descriptions = []
 
-        for meta in node.meta:
+        for meta in map(dict, node.meta):
             type = meta.get("type")
             if not type:
                 continue
@@ -1231,11 +1231,7 @@ class _MetaInfo(object):
         self.name = None
         self.pattern = None
         self.autoname = []
-        self.provides = []
-        self.depends = []
-        self.tags = []
-        self.description = None
-        self.ignore = []
+        self.meta = set()
 
 
     @classmethod
@@ -1253,59 +1249,80 @@ class _MetaInfo(object):
             meta.pattern = name
 
         if "autoname" in config:
-            meta.autoname = splitval(config["autoname"])
+            meta.autoname = set(splitval(config["autoname"]))
 
         # provides
         if "provides" in config:
             provides = splitval(config["provides"])
             for i in provides:
                 parts = i.split(":")
-                meta.provides.append((
-                    parts[0],
-                    parts[1] if len(parts) > 1 and len(parts[1]) else None
-                ))
+                name = parts[0]
+                version = parts[1] if len(parts) > 1 and len(parts[1]) else ""
+                meta.meta.add(frozenset((
+                    ("type", "provides"),
+                    ("name", name),
+                    ("version", version)
+                )))
 
         # depends
         if "depends" in config:
             depends = splitval(config["depends"])
             for i in depends:
                 parts = i.split(":")
-                meta.depends.append((
-                    parts[0],
-                    parts[1] if len(parts) > 1 and len(parts[1]) else None,
-                    parts[2] if len(parts) > 2 and len(parts[2]) else None
-                ))
+                name = parts[0]
+                minversion = parts[1] if len(parts) > 1 and len(parts[1]) else ""
+                maxversion =  parts[2] if len(parts) > 2 and len(parts[2]) else ""
+                meta.meta.add(frozenset((
+                    ("type", "depends"),
+                    ("name", name),
+                    ("minversion", minversion),
+                    ("maxversion", maxversion)
+                )))
+
+
         # tags
-        meta.tags = []
         if "tags" in config:
-            meta.tags = splitval(config["tags"])
+            tags = splitval(config["tags"])
+            for tag in tags:
+                meta.meta.add(frozenset((
+                    ("type", "tag"),
+                    ("tag", tag)
+                )))
 
         # description
         if "description" in config:
             desc = config["description"].strip()
             desc = " ".join([line.strip() for line in desc.splitlines() if len(line)])
-            meta.description = desc
+            meta.meta.add(frozenset((
+                ("type", "description"),
+                ("description", desc)
+            )))
 
         # ignore
         if "ignore" in config:
-            meta.ignore = splitval(config["ignore"])
-
+            ignores = splitval(config["ignore"])
+            for ignore in ignores:
+                meta.meta.add(frozenset((
+                    ("type", "ignore"),
+                    ("ignore", ignore)
+                )))
 
         return meta
 
-    def clone(self):
-        """ Make a copy of the meta but with no users. """
-        newmeta = MetaInfo(self.node)
-        newmeta.name = self.name
-        newmeta.pattern = self.pattern
-        newmeta.autoname = list(self.autoname)
-        newmeta.provides = list(self.provides)
-        newmeta.depends = list(self.depends)
-        newmeta.tags = list(self.tags)
-        newmeta.description = self.description
-        newmeta.ignore = list(self.ignore)
+    def apply_version(self, version):
+        """ Apply a version to the autonames if specified. """
+        if not self.autoname:
+            return
 
-        return newmeta
+        result = set()
+        for name in self.autoname:
+            result.add(frozenset((
+                ("type", "provides"),
+                ("name", name),
+                ("version", version)
+            )))
+
+        return result
 
 
 class UpdateMetaAction(Action):
@@ -1375,7 +1392,7 @@ class UpdateMetaAction(Action):
 
     def resetmeta(self, node):
         """ Clear the meta of a node and all child nodes. """
-        node.meta = []
+        node.meta = set()
         if isinstance(node, Directory):
             for child in node.children:
                 self.resetmeta(node.children[child])
@@ -1411,8 +1428,8 @@ class UpdateMetaAction(Action):
 
         # Check if the meta applies to this directory
         if len(regex) == 1 and regex[0] is True:
-            self.addmeta(node, meta)
             meta.users.append(node)
+            self.addmeta(node, meta, meta.meta)
             return
 
         # Find matching child nodes
@@ -1431,68 +1448,25 @@ class UpdateMetaAction(Action):
                 if len(regex) == 1:
                     # last part of the regex so it applies to the found node
                     meta.users.append(child)
-
+                    self.addmeta(child, meta, meta.meta)
                     if _version is not None:
-                        newmeta = meta.clone()
-                        # Only apply autoname/autoversion if version was found
-                        newmeta.provides.extend(
-                            [(autoname, _version) for autoname in meta.autoname]
-                        )
-                        self.addmeta(child, newmeta)
-                    else:
-                        self.addmeta(child, meta)
+                        self.addmeta(child, meta, meta.apply_version(_version))
 
                 elif len(regex) > 1 and isinstance(child, Directory):
                     # more nested regex to match, recurse if node is directory
                     self._applymeta_walk(child, regex[1:], meta, _version)
 
-    def addmeta(self, node, meta):
+    def addmeta(self, node, meta, values):
         """ Add the metadata to the node. """
 
         # Accumulate the new meta
-        newmeta = []
-        for (name, version) in meta.provides:
-            newmeta.append({
-                "type": "provides",
-                "name": name,
-                "version": version if version is not None else ""
-            })
-
-        for (name, minver, maxver) in meta.depends:
-            newmeta.append({
-                "type": "depends",
-                "name": name,
-                "minversion": minver if minver is not None else "",
-                "maxversion": maxver if maxver is not None else ""
-            })
-
-
-        for tag in meta.tags:
-            newmeta.append({
-                "type": "tag",
-                "tag": tag
-            })
-
-        if meta.description:
-            newmeta.append({
-                "type": "description",
-                "description": meta.description
-            })
-
-        for ignored in meta.ignore:
-            newmeta.append({
-                "type": "ignore",
-                "pattern": ignored
-            })
-
-        # Add to the node (in case other fcmeta entries added meta already)
-        node.meta.extend(newmeta)
+        node.meta.update(values)
 
         # Log
         if self.verbose:
             self.writer.stdout.status(node.prettypath, "META", "FROM: {0}:{1}".format(meta.node.prettypath, meta.name))
-            for meta in newmeta:
-                self.writer.stdout.status(node.prettypath, "META", str(meta))
+            for newmeta in values:
+                self.writer.stdout.status(node.prettypath, "META", str(dict(newmeta)))
 
 
 class CheckMetaAction(Action):
@@ -1519,8 +1493,8 @@ class CheckMetaAction(Action):
         return self._checkdeps_walk(self.program.collection.rootnode, packages)
 
     def _checkdeps_walk_collect(self, node, packages):
-        for meta in node.meta:
-            if meta["type"] != "provides":
+        for meta in map(dict, node.meta):
+            if meta.get("type") != "provides":
                 continue
 
             name = meta.get("name")
@@ -1543,8 +1517,8 @@ class CheckMetaAction(Action):
     def _checkdeps_walk(self, node, packages):
         status = True
 
-        for meta in node.meta:
-            if meta["type"] != "depends":
+        for meta in map(dict, node.meta):
+            if meta.get("type") != "depends":
                 continue
 
             name = meta.get("name")
@@ -1679,7 +1653,11 @@ class FindTagAction(Action):
     def _handle_node(self, node):
         status = False
 
-        alltags = set(meta["tag"].lower() for meta in node.meta if meta["type"] == "tag")
+        alltags = set(
+            meta.get("tag", "").lower()
+            for meta in map(dict, node.meta)
+            if meta.get("type") == "tag"
+        )
         findtags = set(tag.lower() for tag in self.options.tags)
 
         found = findtags.intersection(alltags)
@@ -1735,7 +1713,11 @@ class FindDescAction(Action):
     def _handle_node(self, node):
         status = False
 
-        alldescs = " ".join(meta["description"].lower() for meta in node.meta if meta["type"] == "description")
+        alldescs = " ".join(
+            meta.get("description", "").lower()
+            for meta in map(dict, node.meta)
+            if meta.get("type") == "description"
+        )
         finddescs = set(i.lower() for i in self.options.descs)
         found = set()
 
