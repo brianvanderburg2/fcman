@@ -60,13 +60,9 @@ TIMEDIFF = 2
 NS_COLLECTION = "{urn:mrbavii.fcman:collection}"
 
 
-class Error(Exception):
-    """ A base exception for the application. """
-
-    def __init__(message, retcode=-1):
-        Exception.__init__(message)
-        self.message = message
-        self.retcode = retcode
+def splitval(val):
+    val = ''.join(map(lambda ch: ',' if ch in " \t\r\n" else ch, val))
+    return list(filter(lambda i: len(i) > 0, val.split(',')))
 
 
 class StreamWriter(object):
@@ -214,6 +210,7 @@ class Node(object):
         """ Load the node from the XML and load metadata from that. """
         node = cls._load(parent, xml)
         node._loadmeta(xml)
+        node._post_load()
 
         return node
 
@@ -223,14 +220,23 @@ class Node(object):
             parent node. """
         raise NotImplementedError
 
+    def _post_load(self):
+        """ Can be used to handle data after metadata is loaded. """
+        pass
+
     def save(self, xml):
         """ Save the node and metadata to the XML element. """
+        self._pre_save()
         self._savemeta(xml)
         return self._save(xml)
 
     def _save(self, xml):
         """ Save information to the XML element. """
         raise NotImplementedError
+
+    def _pre_save(self):
+        """ Can be used to add metadata before saving. """
+        pass
 
     # Access/manupulate node
     def exists(self):
@@ -398,7 +404,8 @@ class Directory(Node):
         """ Initialize the directory node. """
         Node.__init__(self, parent, name)
         self.children = {}
-        self.ignore_patterns = []
+        self.ignore_patterns_tag = []
+        self.ignore_patterns_meta = []
 
     @classmethod
     def _load(cls, parent, xml):
@@ -410,11 +417,8 @@ class Directory(Node):
             name = xml.get('name')
             dir = Directory(parent, name)
 
-        dir.ignore_patterns = list( # Python 3, must convert filter to list right away
-            filter(
-                None,
-                xml.get("ignore", "").split(",")
-            )
+        dir.ignore_patterns_tag = list( # Python 3, must convert filter to list right away
+            filter(None, xml.get("ignore", "").split(","))
         )
 
         for child in xml:
@@ -427,13 +431,23 @@ class Directory(Node):
 
         return dir
 
+    def _post_load(self):
+        """ Update ingnore patterns from metadata. """
+        Node._post_load(self)
+        for meta in self.meta:
+            if meta.get("type") == "ignore":
+                # add ignore meta items to the ignore_patterns_meta list
+                # NOT the ignore_patterns list, so it doesn't get
+                # saved back out in the collection.xml tag
+                self.ignore_patterns_meta.append(meta.get("pattern", ""))
+
     def _save(self, xml):
         """ Save the directory node to XML. """
         if not isinstance(self, RootDirectory):
             xml.set('name', self.name)
 
-        if self.ignore_patterns:
-            xml.set("ignore", ",".join(self.ignore_patterns))
+        if self.ignore_patterns_tag:
+            xml.set("ignore", ",".join(self.ignore_patterns_tag))
 
         for name in sorted(self.children):
             child = self.children[name]
@@ -452,7 +466,10 @@ class Directory(Node):
 
     def ignore(self, name):
         """ Ignore certain files under the directory. """
-        return any(map(lambda i: fnmatch.fnmatch(name, i), self.ignore_patterns))
+        return any(map(
+            lambda i: fnmatch.fnmatch(name, i),
+            self.ignore_patterns_tag + self.ignore_patterns_meta
+        ))
 
     def exists(self):
         """ Test if the directory exists. """
@@ -1218,18 +1235,13 @@ class _MetaInfo(object):
         self.depends = []
         self.tags = []
         self.description = None
+        self.ignore = []
 
 
     @classmethod
     def load(cls, node, name, config):
         """ Load metadata from an INI config section. """
-
         meta = _MetaInfo(node)
-
-        def splitval(val):
-            val = ''.join(map(lambda ch: ',' if ch in " \t\r\n" else ch, val))
-            return list(filter(lambda i: len(i) > 0, val.split(',')))
-
         meta.name = name
 
         # pattern
@@ -1274,6 +1286,10 @@ class _MetaInfo(object):
             desc = " ".join([line.strip() for line in desc.splitlines() if len(line)])
             meta.description = desc
 
+        # ignore
+        if "ignore" in config:
+            meta.ignore = splitval(config["ignore"])
+
 
         return meta
 
@@ -1287,6 +1303,7 @@ class _MetaInfo(object):
         newmeta.depends = list(self.depends)
         newmeta.tags = list(self.tags)
         newmeta.description = self.description
+        newmeta.ignore = list(self.ignore)
 
         return newmeta
 
@@ -1460,6 +1477,12 @@ class UpdateMetaAction(Action):
             newmeta.append({
                 "type": "description",
                 "description": meta.description
+            })
+
+        for ignored in meta.ignore:
+            newmeta.append({
+                "type": "ignore",
+                "pattern": ignored
             })
 
         # Add to the node (in case other fcmeta entries added meta already)
