@@ -1,0 +1,24 @@
+Unreleased
+==========
+
+Changed
+-------
+* Main data file is now stored in the root directory again by default
+
+Added
+-----
+* The data file can specify a relative path from the data file to the root of
+  the directory.  This can allow for a data file to be stored externally to
+  the collection.
+
+* Directory nodes can have an exclude pattern which specifies patterns which
+  are excluded from that directory.  In addition, exclude metadata can specify
+  exclude patterns.
+
+* Any directory named "fcmeta.xml" automatically activates a mode were any INI
+  files under that directory recursively is treated as a metadata file.
+
+* The "[fcman:fcmeta]" tag of a meta file can specify a target directory to
+  treat as the relative path any items in the meta file apply to.
+
+

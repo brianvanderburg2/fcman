@@ -495,8 +495,9 @@ class Collection(object):
         """ Initialize the collection with the root of the collection. """
 
         self.root = os.path.normpath(root) if root is not None else None
-        self.autoroot = "."
         self.rootnode = RootDirectory(self)
+        self.autoroot = "."
+        self.dirty = False # This flag is set externally by actions to indicate to save
 
     def normalize(self, path):
         """ Normalize an external path to be relative to the collection root. """
@@ -573,8 +574,6 @@ class Collection(object):
                 element.tail = "\n" + " " * (level - 1)
 
             queue[0:0] = children
-
-        # TODO: handle backup
 
         # We don't need to use codecs here as ElementTree actually does the
         # encoding based on the enconding= parameter, unlike xml.dom.minidom
@@ -667,7 +666,12 @@ class InitAction(Action):
             return False
 
         self.writer.stdout.status(self.options.file, "INIT")
-        coll.save(self.options.file)
+
+        # Store the collection and file in the program so it will save it
+        self.program.file = self.options.file
+        self.program.collection = coll
+        coll.dirty = True
+
         return True
 
 
@@ -849,7 +853,7 @@ class UpdateAction(Action):
         else:
             return False
 
-        self.program.collection.save(self.program.file)
+        self.program.collection.dirty = True
         return True
 
     def handle_symlink(self, node):
@@ -953,7 +957,7 @@ class MoveAction(Action):
         else:
             self.writer.stdout.status(nodepath, "MOVE", node)
 
-        self.program.collection.save(self.program.file)
+        self.program.collection.dirty = True
         return True
 
 
@@ -986,7 +990,7 @@ class RenameAction(Action):
         else:
             self.writer.stdout.status(nodepath, "RENAME", node)
 
-        self.program.collection.save(self.program.file)
+        self.program.collection.dirty = True
         return True
 
 
@@ -1018,7 +1022,7 @@ class DeleteAction(Action):
         else:
             self.writer.stdout.status(nodepath, "DELETE")
 
-        self.program.collection.save(self.program.file)
+        self.program.collection.dirty = True
         return True
 
 
@@ -1071,7 +1075,7 @@ class AddAction(UpdateAction):
         else:
             return False
 
-        self.program.collection.save(self.program.file)
+        self.program.collection.dirty = True
         return True
 
     def _handle_parents(self, node, parts):
@@ -1361,7 +1365,7 @@ class UpdateMetaAction(Action):
         if not self.applymeta():
             return False
 
-        self.program.collection.save(self.program.file)
+        self.program.collection.dirty = True
 
         for meta in self._allmeta:
             if not meta.users:
@@ -1851,14 +1855,15 @@ class Program(object):
         parser.add_argument("-v", "--verbose", dest="verbose", default=False, action="store_true")
         parser.add_argument("-w", "--walk", dest="walk", default=False, action="store_true")
         parser.add_argument("-x", "--no-recurse", dest="recurse", default=True, action="store_false")
+        parser.add_argument("-b", "--backup", dest="backup", type=int, default=5, choices=range(0,10))
         parser.set_defaults(action=None)
 
         # Add commands
-        commands = list(filter(lambda cls: cls.ACTION_NAME is not None, Action.get_subclasses()))
-        commands.sort(key=lambda cls: cls.ACTION_NAME)
         subparsers = parser.add_subparsers()
 
-        # Now the rest
+        commands = list(filter(lambda cls: cls.ACTION_NAME is not None, Action.get_subclasses()))
+        commands.sort(key=lambda cls: cls.ACTION_NAME)
+
         for i in commands:
             subparser = subparsers.add_parser(i.ACTION_NAME, help=i.ACTION_DESC)
             i.add_arguments(subparser)
@@ -1908,7 +1913,35 @@ class Program(object):
         if not action(self).run():
             return -1
 
+        if self.collection and self.collection.dirty:
+            self.save_backup()
+            self.collection.save(self.file)
+
         return 0
+
+    def save_backup(self):
+        """ Save a backup based on the filename if requested. """
+        filename = self.file
+        backup = self.options.backup
+        if backup == 0:
+            return
+
+        backup_concat = tuple(".{0}bak".format(i) for i in range(1, backup + 1))
+
+        if os.path.exists(filename):
+            # Remove last backup if it exists
+            if os.path.exists(filename + backup_concat[-1]):
+                os.remove(filename + backup_concat[-1])
+
+            for i in range(len(backup_concat) - 2, -1, -1):
+                if os.path.exists(filename + backup_concat[i]):
+                    os.rename(
+                        filename + backup_concat[i],
+                        filename + backup_concat[i + 1]
+                    )
+
+            os.rename(filename, filename + backup_concat[0])
+
 
     def find_file(self):
         """ Use our options to find file. """
