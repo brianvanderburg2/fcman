@@ -92,7 +92,8 @@ class InitAction(Action):
     def run(self):
         # This is a special action, collection is not loaded at this point
         # can't use self.program.file or self.program.collection
-        coll = collection.Collection(".")
+        coll = collection.Collection()
+        coll.set_root(".")
         if self.options.root is not None:
             coll.autoroot = self.options.root
 

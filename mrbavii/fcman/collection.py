@@ -360,17 +360,21 @@ class RootDirectory(Directory):
 class Collection(object):
     """ This is the collection object. """
 
-    def __init__(self, root):
+    def __init__(self):
         """ Initialize the collection with the root of the collection. """
 
-        self.root = os.path.normpath(root) if root is not None else None
+        self.root = None
         self.rootnode = RootDirectory(self)
         self.autoroot = "."
         self.dirty = False # This flag is set externally by actions to indicate to save
 
+    def set_root(self, root):
+        """ Set the root the collection represents. """
+        self.root = os.path.normpath(root) if root is not None else None
+
     def normalize(self, path):
         """ Normalize an external path to be relative to the collection root. """
-        if path is None:
+        if path is None or self.root is None:
             return None
 
         # Find the relative path, then apply corrections
@@ -395,9 +399,9 @@ class Collection(object):
         return parts
 
     @classmethod
-    def load(cls, filename, root=None):
+    def load(cls, filename):
         """ Function to load a file and return the collection object. """
-        coll = Collection(root)
+        coll = Collection()
 
         tree = ET.parse(filename)
         root_xml_node = tree.getroot()
@@ -405,11 +409,6 @@ class Collection(object):
             return None
 
         coll.autoroot = root_xml_node.get("root", ".").replace("/", os.sep)
-        if root is None:
-            coll.root = os.path.normpath(os.path.join(
-                os.path.dirname(filename),
-                coll.autoroot
-            ))
 
         # Load the root node
         coll.rootnode = RootDirectory.load(coll, root_xml_node)

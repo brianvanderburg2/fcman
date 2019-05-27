@@ -149,7 +149,18 @@ class Program(object):
             elif verbose:
                 writer.stdout.status(self.file, "COLLECTION")
 
-            self.collection = collection.Collection.load(self.file, self.options.root)
+            self.collection = collection.Collection.load(self.file)
+
+            if self.options.root:
+                self.collection.set_root(self.options.root)
+            elif self.collection.autoroot:
+                self.collection.set_root(os.path.join(
+                    os.path.dirname(self.file),
+                    self.collection.autoroot
+                ))
+            else:
+                self.collection.set_root(os.path.dirname(self.file))
+
             if verbose:
                 writer.stdout.status(self.collection.root, "ROOT")
 
