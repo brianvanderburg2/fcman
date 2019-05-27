@@ -164,7 +164,7 @@ class Node(object):
         """ Initialize the node with the parent and name. """
         self.name = name
         self.parent = parent
-        self.meta = set()
+        self.meta = dict()
 
         if parent is not None:
             parent.children[name] = self
@@ -192,15 +192,40 @@ class Node(object):
     # Load and save meta
     def _loadmeta(self, xml):
         """ Load metadata for node. """
-        self.meta = set()
+        self.meta = dict()
         for child in xml:
             if child.tag == "meta":
-                self.meta.add(frozenset(child.items()))
+                metatype = child.get("type", "")
+                metaset = self.meta.setdefault(metatype, set())
+                metaset.add(frozenset(child.items()))
 
     def _savemeta(self, xml):
         """ Save metadata to xml. """
-        for meta in self.meta:
-            ET.SubElement(xml, "meta", attrib=dict(meta))
+        for metatype in sorted(self.meta):
+            for meta in self.meta[metatype]:
+                ET.SubElement(xml, "meta", attrib=dict(meta))
+
+    def addmeta(self, metatype, metadata):
+        """ Add metadata. """
+        metadata = dict(metadata)
+        metadata["type"] = metatype
+
+        metaset = self.meta.setdefault(metatype, set())
+        metaset.add(frozenset(metadata.items()))
+
+    def getmeta(self, metatype=None):
+        """ Get metadata.  Generator yields dict for each metadata. """
+        if metatype is not None:
+            for metaset in self.meta.get(metatype, ()):
+                yield dict(metaset)
+        else:
+            for metatype in sorted(self.meta):
+                for metaset in self.meta[metatype]:
+                    yield dict(metaset)
+
+    def clearmeta(self):
+        """ Clear metadata. """
+        self.meta = dict()
 
     # Load and save
     @classmethod
@@ -209,7 +234,6 @@ class Node(object):
         # pylint: disable=protected-access
         node = cls._load(parent, xml)
         node._loadmeta(xml)
-        node._post_load()
 
         return node
 
@@ -219,23 +243,14 @@ class Node(object):
             parent node. """
         raise NotImplementedError
 
-    def _post_load(self):
-        """ Can be used to handle data after metadata is loaded. """
-        pass
-
     def save(self, xml):
         """ Save the node and metadata to the XML element. """
-        self._pre_save()
         self._savemeta(xml)
         return self._save(xml)
 
     def _save(self, xml):
         """ Save information to the XML element. """
         raise NotImplementedError
-
-    def _pre_save(self):
-        """ Can be used to add metadata before saving. """
-        pass
 
     # Access/manupulate node
     def exists(self):
@@ -400,8 +415,7 @@ class Directory(Node):
         """ Initialize the directory node. """
         Node.__init__(self, parent, name)
         self.children = {}
-        self.ignore_patterns_tag = []
-        self.ignore_patterns_meta = []
+        self.ignore_patterns = []
 
     @classmethod
     def _load(cls, parent, xml):
@@ -413,9 +427,10 @@ class Directory(Node):
             name = xml.get('name')
             dir = Directory(parent, name)
 
-        dir.ignore_patterns_tag = list( # Python 3, must convert filter to list right away
-            filter(None, xml.get("ignore", "").split(","))
-        )
+        dir.ignore_patterns = []
+        for pattern in xml.get("ignore", "").split(","):
+            if pattern:
+                dir.ignore_patterns.append(pattern)
 
         for child in xml:
             if child.tag == 'symlink':
@@ -427,24 +442,13 @@ class Directory(Node):
 
         return dir
 
-    def _post_load(self):
-        """ Update ingnore patterns from metadata. """
-        Node._post_load(self)
-        for meta in self.meta:
-            meta = dict(meta)
-            if meta.get("type") == "ignore":
-                # add ignore meta items to the ignore_patterns_meta list
-                # NOT the ignore_patterns list, so it doesn't get
-                # saved back out in the collection.xml tag
-                self.ignore_patterns_meta.append(meta.get("pattern", ""))
-
     def _save(self, xml):
         """ Save the directory node to XML. """
         if not isinstance(self, RootDirectory):
             xml.set('name', self.name)
 
-        if self.ignore_patterns_tag:
-            xml.set("ignore", ",".join(self.ignore_patterns_tag))
+        if self.ignore_patterns:
+            xml.set("ignore", ",".join(self.ignore_patterns))
 
         for name in sorted(self.children):
             child = self.children[name]
@@ -463,10 +467,15 @@ class Directory(Node):
 
     def ignore(self, name):
         """ Ignore certain files under the directory. """
-        return any(map(
-            lambda i: fnmatch.fnmatch(name, i),
-            self.ignore_patterns_tag + self.ignore_patterns_meta
-        ))
+        for i in self.ignore_patterns:
+            if fnmatch.fnmatch(name, i):
+                return True
+
+        for meta in self.getmeta("ignore"):
+            if fnmatch.fnmatch(name, meta.get("pattern", "")):
+                return True
+
+        return False
 
     def exists(self):
         """ Test if the directory exists. """
@@ -531,11 +540,11 @@ class Collection(object):
         coll = Collection(root)
 
         tree = ET.parse(filename)
-        rootnode = tree.getroot()
-        if not rootnode.tag == 'collection':
+        root_xml_node = tree.getroot()
+        if not root_xml_node.tag == 'collection':
             return None
 
-        coll.autoroot = rootnode.get("root", ".").replace("/", os.sep)
+        coll.autoroot = root_xml_node.get("root", ".").replace("/", os.sep)
         if root is None:
             coll.root = os.path.normpath(os.path.join(
                 os.path.dirname(filename),
@@ -543,23 +552,23 @@ class Collection(object):
             ))
 
         # Load the root node
-        coll.rootnode = RootDirectory.load(coll, rootnode)
+        coll.rootnode = RootDirectory.load(coll, root_xml_node)
 
         return coll
 
     def save(self, filename):
         """ Save the collection to XML. """
-        root = ET.Element('collection')
+        root_xml_node = ET.Element('collection')
         if self.autoroot:
-            root.set("root", self.autoroot.replace(os.sep, "/"))
+            root_xml_node.set("root", self.autoroot.replace(os.sep, "/"))
         else:
-            root.set("root", ".")
+            root_xml_node.set("root", ".")
 
-        self.rootnode.save(root)
-        tree = ET.ElementTree(root)
+        self.rootnode.save(root_xml_node)
+        tree = ET.ElementTree(root_xml_node)
 
         # Prettify the output ourselves, similar to some code at stack overflow
-        queue = [(0, root)]
+        queue = [(0, root_xml_node)]
         while queue:
             (level, element) = queue.pop(0)
             children = [(level + 1, child) for child in list(element)]
@@ -1183,7 +1192,7 @@ class ExportAction(Action):
         tags = set()
         descriptions = []
 
-        for meta in map(dict, node.meta):
+        for meta in node.getmeta():
             type = meta.get("type")
             if not type:
                 continue
@@ -1432,7 +1441,7 @@ class UpdateMetaAction(Action):
 
     def resetmeta(self, node):
         """ Clear the meta of a node and all child nodes. """
-        node.meta = set()
+        node.clearmeta()
         if isinstance(node, Directory):
             for child in node.children:
                 self.resetmeta(node.children[child])
@@ -1544,7 +1553,9 @@ class UpdateMetaAction(Action):
         """ Add the metadata to the node. """
 
         # Accumulate the new meta
-        node.meta.update(values)
+        for entry in values:
+            entry = dict(entry)
+            node.addmeta(entry.get("type", ""), entry)
 
         # Log
         if self.verbose:
@@ -1552,8 +1563,8 @@ class UpdateMetaAction(Action):
                 node.prettypath,
                 "META", "FROM: {0}:{1}".format(meta.node.prettypath, meta.name)
             )
-            for newmeta in values:
-                self.writer.stdout.status(node.prettypath, "META", str(dict(newmeta)))
+            for entry in values:
+                self.writer.stdout.status(node.prettypath, "META", str(dict(entry)))
 
 
 class CheckMetaAction(Action):
@@ -1580,10 +1591,7 @@ class CheckMetaAction(Action):
         return self._checkdeps_walk(self.program.collection.rootnode, packages)
 
     def _checkdeps_walk_collect(self, node, packages):
-        for meta in map(dict, node.meta):
-            if meta.get("type") != "provides":
-                continue
-
+        for meta in node.getmeta("provides"):
             name = meta.get("name")
             if not name:
                 continue
@@ -1604,9 +1612,7 @@ class CheckMetaAction(Action):
     def _checkdeps_walk(self, node, packages):
         status = True
 
-        for meta in map(dict, node.meta):
-            if meta.get("type") != "depends":
-                continue
+        for meta in node.getmeta("depends"):
 
             name = meta.get("name")
             if not name:
@@ -1715,10 +1721,10 @@ class FindTagAction(Action):
     def _handle_node(self, node):
         status = False
 
+
         alltags = set(
             meta.get("tag", "").lower()
-            for meta in map(dict, node.meta)
-            if meta.get("type") == "tag"
+            for meta in node.getmeta("tag")
         )
         findtags = set(tag.lower() for tag in self.options.tags)
 
@@ -1777,8 +1783,7 @@ class FindDescAction(Action):
 
         alldescs = " ".join(
             meta.get("description", "").lower()
-            for meta in map(dict, node.meta)
-            if meta.get("type") == "description"
+            for meta in node.getmeta("description")
         )
         finddescs = set(i.lower() for i in self.options.descs)
         found = set()
@@ -1855,7 +1860,7 @@ class Program(object):
         parser.add_argument("-v", "--verbose", dest="verbose", default=False, action="store_true")
         parser.add_argument("-w", "--walk", dest="walk", default=False, action="store_true")
         parser.add_argument("-x", "--no-recurse", dest="recurse", default=True, action="store_false")
-        parser.add_argument("-b", "--backup", dest="backup", type=int, default=5, choices=range(0,10))
+        parser.add_argument("-b", "--backup", dest="backup", type=int, default=5, choices=range(0, 10))
         parser.set_defaults(action=None)
 
         # Add commands
