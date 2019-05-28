@@ -1131,6 +1131,7 @@ class FindTagAction(Action):
             action="store_true",
             help="Report paths only if the path has all tags specified."
         )
+        parser.add_argument("path", help="Path to search")
         parser.add_argument(
             "tags",
             nargs="+",
@@ -1138,11 +1139,9 @@ class FindTagAction(Action):
         )
 
     def run(self):
-        norm = self.program.collection.normalize(os.curdir)
-        if norm:
-            node = self.find_node(norm)
-        else:
-            node = self.program.collection.rootnode
+        node = self.find_node(
+            self.program.collection.normalize(self.options.path)
+        )
 
         if node is None:
             self.writer.stderr.status(self.program.cwd, "BADPATH")
@@ -1152,7 +1151,6 @@ class FindTagAction(Action):
 
     def _handle_node(self, node):
         status = False
-
 
         alltags = set(
             meta.get("tag", "").lower()
@@ -1196,6 +1194,7 @@ class FindDescAction(Action):
             action="store_true",
             help="Report paths only if the path has all descriptions specified."
         )
+        parser.add_argument("path", help="Path to search")
         parser.add_argument(
             "descs",
             nargs="+",
@@ -1203,11 +1202,9 @@ class FindDescAction(Action):
         )
 
     def run(self):
-        norm = self.program.collection.normalize(os.curdir)
-        if norm:
-            node = self.find_node(norm)
-        else:
-            node = self.program.collection.rootnode
+        node = self.find_node(
+            self.program.collection.normalize(self.options.path)
+        )
 
         if node is None:
             self.writer.stderr.status(self.program.cwd, "BADPATH")
@@ -1260,17 +1257,16 @@ class FindPathAction(Action):
             "-c", "--no-case", dest="nocase", default=False, action="store_true",
             help="Perform case insensitive match for path names."
         )
+        parser.add_argument("path", help="Path to search")
         parser.add_argument(
-            "path",
+            "pattern",
             help="path pattern to find."
         )
 
     def run(self):
-        norm = self.program.collection.normalize(os.curdir)
-        if norm:
-            node = self.find_node(norm)
-        else:
-            node = self.program.collection.rootnode
+        node = self.find_node(
+            self.program.collection.normalize(self.options.path)
+        )
 
         if node is None:
             self.writer.stderr.status(self.program.cwd, "BADPATH")
@@ -1281,15 +1277,16 @@ class FindPathAction(Action):
     def _handle_node(self, node):
         status = False
 
-        pattern = self.options.path
+        pattern = self.options.pattern
         path = node.prettypath
 
         matched = False
         if pattern[0:2] == "r:":
             matched = re.search(pattern[2:], path)
-        elif self.options.nocase:
-            pattern = pattern.lower()
-            path = path.lower()
+        else:
+            if self.options.nocase:
+                pattern = pattern.lower()
+                path = path.lower()
 
             if fnmatch.fnmatch(path, pattern):
                 matched = True

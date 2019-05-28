@@ -377,6 +377,12 @@ class Collection(object):
         if path is None or self.root is None:
             return None
 
+        # If a path specified starts with "/", we want to treat it relative
+        # to the collection root not the CWD, since normally one would not
+        # create a collection of the root directory of their system anyway
+        if path[0:1] == "/":
+            path = os.path.join(self.root, path[1:])
+
         # Find the relative path, then apply corrections
         # relpath already normalizes "." and ".."
         relpath = os.path.relpath(path, self.root)
