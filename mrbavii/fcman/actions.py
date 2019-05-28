@@ -1,11 +1,12 @@
 """ Action classes. """
+# pylint: disable=too-many-lines,missing-docstring,too-many-branches
 
 __author__ = "Brian Allen Vanderburg II"
 __copyright__ = "Copyright (C) 2013-2018 Brian Allen Vanderburg II"
 __license__ = "MIT License"
 
 
-__all__ = [ "Action" ]
+__all__ = ["Action"]
 
 
 from configparser import SafeConfigParser
@@ -70,9 +71,9 @@ class Action(object):
                 if name == path[0]:
                     node = node.children[name]
                     path.pop(0)
-                    break # break out of for loop
+                    break # break for
             else:
-                break # break out of while loop if for loop wasn't broken
+                break # break while
 
         # len(path) == 0 means we found the node, else just the nearest parent
         return (node, path)
@@ -302,7 +303,7 @@ class UpdateAction(Action):
         stat = os.stat(node.path)
 
         if (self.options.force or
-                abs(node.timestamp - stat.st_mtime) > TIMEDIFF or
+                abs(node.timestamp - stat.st_mtime) > util.TIMEDIFF or
                 node.size != stat.st_size or node.checksum == ""):
 
             if self.verbose:
@@ -612,7 +613,8 @@ class ExportAction(Action):
         if node.meta:
             self._dumpmeta(node, streams)
 
-    def _dumpmeta(self, node, streams):
+    @staticmethod
+    def _dumpmeta(node, streams):
         """ Dump the metadata that we know about to the information file. """
         provides = []
         depends = []
@@ -1089,7 +1091,8 @@ class CheckMetaAction(Action):
             # Found a version that is within the range
             return True
 
-    def _checkdeps_compare(self, ver1, ver2):
+    @staticmethod
+    def _checkdeps_compare(ver1, ver2):
         """ A simple version compare based only on numbers and periods. """
 
         try:
@@ -1111,7 +1114,6 @@ class CheckMetaAction(Action):
             return 1
         else:
             return 0
-
 
 
 class FindTagAction(Action):
@@ -1301,6 +1303,3 @@ class FindPathAction(Action):
                     status = True
 
         return status
-
-
-

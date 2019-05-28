@@ -1,20 +1,10 @@
 #!/usr/bin/env python3
-# pylint: disable=too-many-lines,missing-docstring
+# pylint: disable=line-too-long,missing-docstring,too-few-public-methods
 """ File collection management utility. """
 
 __author__ = "Brian Allen Vanderburg II"
 __copyright__ = "Copyright 2000-2019"
 __license__ = "MIT"
-
-# {{{1 Meta information
-
-__author__ = "Brian Allen Vanderburg II"
-__copyright__ = "Copyright (C) 2013-2018 Brian Allen Vanderburg II"
-__license__ = "MIT License"
-__version__ = "20190303.1"
-
-
-# stdout vs stderr
 
 # stderr should be for when a program error occurs
 # - Any exception raised and not handled
@@ -25,29 +15,19 @@ __version__ = "20190303.1"
 #   new items, bad dependencies, etc, should go to stdout
 # - in verbose mode, non-error verbose information goes to stdout
 
-
-# Still need to add better error handling and printing
-
-
-# Imports
-
 import argparse
 import os
 import sys
 
-
 from . import util
-from . import actions 
+from . import actions
 from . import collection
 
 
-# Checks
-
+# Only run on Python 3
 if sys.version_info[0:2] < (3, 2):
     sys.exit("This program requires Python 3.2 or greater")
 
-
-# Program entry point
 
 class VerboseChecker(object):
     """ A small class whose boolean value depends on verbose or a signal. """
@@ -87,7 +67,8 @@ class Program(object):
         self.writer = None
 
 
-    def create_arg_parser(self):
+    @staticmethod
+    def create_arg_parser():
         """ Create parser for main and actions """
         parser = argparse.ArgumentParser()
 
@@ -104,7 +85,7 @@ class Program(object):
         # Add commands
         subparsers = parser.add_subparsers()
 
-        commands = list(filter(lambda cls: cls.ACTION_NAME is not None, actions.Action.get_subclasses()))
+        commands = list(cls for cls in actions.Action.get_subclasses() if cls.ACTION_NAME is not None)
         commands.sort(key=lambda cls: cls.ACTION_NAME)
 
         for i in commands:
@@ -222,4 +203,3 @@ class Program(object):
 
 def main():
     sys.exit(Program().main())
-

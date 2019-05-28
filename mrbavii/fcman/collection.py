@@ -1,4 +1,5 @@
 """ Collection classes. """
+# pylint: disable=too-many-arguments
 
 __author__ = "Brian Allen Vanderburg II"
 __copyright__ = "Copyright (C) 2013-2018 Brian Allen Vanderburg II"
@@ -282,10 +283,10 @@ class Directory(Node):
         """ Load the directory node from XML. """
         # If parent is a collection object, then we are a RootDirectory
         if isinstance(parent, Collection):
-            dir = RootDirectory(parent)
+            dir = RootDirectory(parent) # pylint: disable=redefined-builtin
         else:
             name = xml.get('name')
-            dir = Directory(parent, name)
+            dir = Directory(parent, name) # pylint: disable=redefined-variable-type
 
         dir.ignore_patterns = []
         for pattern in xml.get("ignore", "").split(","):
@@ -345,7 +346,7 @@ class Directory(Node):
         """ Update the path list recursively for children. """
         Node._update_pathlist(self)
         for name in self.children:
-            self.children[name]._update_pathlist()
+            self.children[name]._update_pathlist() # pylint: disable=protected-access
 
 
 class RootDirectory(Directory):
@@ -453,5 +454,3 @@ class Collection(object):
         # encoding based on the enconding= parameter, unlike xml.dom.minidom
         tree.write(filename, encoding='utf-8', xml_declaration=True,
                    method='xml')
-
-

@@ -1,4 +1,5 @@
 """ Utility classes and functions for mrbavii.fcman """
+# pylint: disable=too-few-public-methods,redefined-builtin
 
 __author__ = "Brian Allen Vanderburg II"
 __copyright__ = "Copyright 2000-2019"
@@ -13,7 +14,7 @@ import io
 import sys
 
 from . import collection
-    
+
 
 # Time difference to consider a file's timestamp changed
 TIMEDIFF = 2
@@ -120,4 +121,3 @@ class StdStreamWriter(object):
         """ Initialize teh writer. """
         self.stdout = LogWriter(sys.stdout)
         self.stderr = LogWriter(sys.stderr)
-
