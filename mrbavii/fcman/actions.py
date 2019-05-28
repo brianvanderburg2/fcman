@@ -631,7 +631,7 @@ class ExportAction(Action):
                     meta.get("name"),
                     meta.get("version")
                 ))
-            elif type == "dpeends":
+            elif type == "depends":
                 depends.append((
                     meta.get("name"),
                     meta.get("minversion"),
