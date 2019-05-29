@@ -22,8 +22,9 @@ def _import_actions():
             continue
 
         for action in module_actions:
-            assert action.ACTION_NAME not in actions, "Duplicate Action {0}".format(action_name)
-            actions[action.ACTION_NAME] = action
+            action_name = action.ACTION_NAME
+            assert action_name not in actions, "Duplicate Action {0}".format(action_name)
+            actions[action_name] = action
 
     return actions
 
@@ -31,4 +32,3 @@ def _import_actions():
 # Load them
 ACTIONS = _import_actions()
 del _import_actions
-
