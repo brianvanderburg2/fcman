@@ -84,9 +84,7 @@ class Program(object):
 
         # Add commands
         subparsers = parser.add_subparsers()
-
-        commands = list(cls for cls in actions.Action.get_subclasses() if cls.ACTION_NAME is not None)
-        commands.sort(key=lambda cls: cls.ACTION_NAME)
+        commands = list(actions.ACTIONS[name] for name in sorted(actions.ACTIONS))
 
         for i in commands:
             subparser = subparsers.add_parser(i.ACTION_NAME, help=i.ACTION_DESC)
