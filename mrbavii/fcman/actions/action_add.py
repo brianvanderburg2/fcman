@@ -28,7 +28,6 @@ class AddAction(UpdateAction):
             "-p", "--parents", dest="parents", default=False,
             action="store_true", help="Create parent directory nodes if possible and needed"
         )
-        parser.add_argument("path", help="The file system item to add.")
 
     def run(self):
         path = self.normalize_path(self.options.path)

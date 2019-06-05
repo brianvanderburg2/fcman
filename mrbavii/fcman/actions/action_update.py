@@ -29,7 +29,7 @@ class UpdateAction(ActionBase):
             "-f", "--force", dest="force", default=False,
             action="store_true", help="Always update the checksum."
         )
-        parser.add_argument("path", nargs="?", default=".", help="Path to update")
+        parser.add_argument("path", nargs="?", default=".", help="Path to " + cls.ACTION_NAME)
 
     def run(self):
         path = self.normalize_path(self.options.path)
