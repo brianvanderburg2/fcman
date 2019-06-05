@@ -7,9 +7,8 @@ Changed
 
 Added
 -----
-* The data file can specify a relative path from the data file to the root of
-  the directory.  This can allow for a data file to be stored externally to
-  the collection.
+* The data file can specify a relative path to the collection's root directory.
+  This permits the data file to be stored externally to the collection.
 
 * Directory nodes can have an exclude pattern which specifies patterns which
   are excluded from that directory.  In addition, exclude metadata can specify
