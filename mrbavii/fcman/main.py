@@ -80,6 +80,7 @@ class Program(object):
         parser.add_argument("-w", "--walk", dest="walk", default=False, action="store_true")
         parser.add_argument("-x", "--no-recurse", dest="recurse", default=True, action="store_false")
         parser.add_argument("-b", "--backup", dest="backup", type=int, default=5, choices=range(0, 10))
+        parser.add_argument("-e", "--exportdir", dest="exportdir", default=None)
         parser.set_defaults(action=None)
 
         # Add commands
@@ -117,31 +118,11 @@ class Program(object):
             parser.print_help()
             parser.exit()
 
+        action.parse_arguments(options)
         if action.ACTION_NAME != "init":
             # Load the collection if needed
-            self.file = self.find_file()
-            action.parse_arguments(options)
-
-            if not self.file:
-                writer.stderr.status("Collection not found", "NOFILE")
+            if not self.load_file():
                 return -1
-            elif verbose:
-                writer.stdout.status(self.file, "COLLECTION")
-
-            self.collection = collection.Collection.load(self.file)
-
-            if self.options.root:
-                self.collection.set_root(self.options.root)
-            elif self.collection.autoroot:
-                self.collection.set_root(os.path.join(
-                    os.path.dirname(self.file),
-                    self.collection.autoroot
-                ))
-            else:
-                self.collection.set_root(os.path.dirname(self.file))
-
-            if verbose:
-                writer.stdout.status(self.collection.root, "ROOT")
 
         if not action(self).run():
             return -1
@@ -152,9 +133,58 @@ class Program(object):
 
         return 0
 
+    def load_file(self):
+        """ Load the file. """
+        writer = self.writer
+        verbose = self.verbose
+
+        self.file = self.find_file()
+
+        if not self.file:
+            writer.stderr.status("Collection not found", "NOFILE")
+            return False
+        elif verbose:
+            writer.stdout.status(self.file, "COLLECTION")
+
+        self.collection = collection.Collection.load(self.file)
+
+        # Set root
+        if self.options.root:
+            self.collection.set_root(self.options.root)
+        elif self.collection.autoroot:
+            self.collection.set_root(os.path.join(
+                os.path.dirname(self.file),
+                self.collection.autoroot
+            ))
+        else:
+            self.collection.set_root(os.path.dirname(self.file))
+
+        if verbose:
+            writer.stdout.status(self.collection.root, "ROOT")
+
+        # Set exportdir
+        if self.options.exportdir:
+            self.collection.set_exportdir(self.options.exportdir)
+        elif self.collection.autoexportdir:
+            self.collection.set_exportdir(os.path.join(
+                os.path.dirname(self.file),
+                self.collection.autoexportdir
+            ))
+        else:
+            self.collection.set_exportdir(os.path.dirname(self.file))
+
+        if verbose:
+            writer.stdout.status(self.collection.exportdir, "EXPORT")
+
+        return True
+
     def save_backup(self):
         """ Save a backup based on the filename if requested. """
         filename = self.file
+        backupname = os.path.join(
+            self.collection.exportdir,
+            os.path.basename(filename)
+        )
         backup = self.options.backup
         if backup == 0:
             return
@@ -162,18 +192,22 @@ class Program(object):
         backup_concat = tuple(".{0}bak".format(i) for i in range(1, backup + 1))
 
         if os.path.exists(filename):
+            # Make directory if it doesn't exist
+            if not os.path.isdir(self.collection.exportdir):
+                os.makedirs(self.collection.exportdir)
+
             # Remove last backup if it exists
-            if os.path.exists(filename + backup_concat[-1]):
-                os.remove(filename + backup_concat[-1])
+            if os.path.exists(backupname + backup_concat[-1]):
+                os.remove(backupname + backup_concat[-1])
 
             for i in range(len(backup_concat) - 2, -1, -1):
-                if os.path.exists(filename + backup_concat[i]):
+                if os.path.exists(backupname + backup_concat[i]):
                     os.rename(
-                        filename + backup_concat[i],
-                        filename + backup_concat[i + 1]
+                        backupname + backup_concat[i],
+                        backupname + backup_concat[i + 1]
                     )
 
-            os.rename(filename, filename + backup_concat[0])
+            os.rename(filename, backupname + backup_concat[0])
 
 
     def find_file(self):

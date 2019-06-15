@@ -367,11 +367,17 @@ class Collection(object):
         self.root = None
         self.rootnode = RootDirectory(self)
         self.autoroot = "."
+        self.exportdir = None
+        self.autoexportdir = "."
         self.dirty = False # This flag is set externally by actions to indicate to save
 
     def set_root(self, root):
         """ Set the root the collection represents. """
         self.root = os.path.normpath(root) if root is not None else None
+
+    def set_exportdir(self, exportdir):
+        """ Set the export directory that backups and exports use. """
+        self.exportdir = os.path.normpath(exportdir) if exportdir is not None else None
 
     def normalize(self, path):
         """ Normalize an external path to be relative to the collection root. """
@@ -416,6 +422,7 @@ class Collection(object):
             return None
 
         coll.autoroot = root_xml_node.get("root", ".").replace("/", os.sep)
+        coll.autoexportdir = root_xml_node.get("export", ".").replace("/", os.sep)
 
         # Load the root node
         coll.rootnode = RootDirectory.load(coll, root_xml_node)
@@ -429,6 +436,11 @@ class Collection(object):
             root_xml_node.set("root", self.autoroot.replace(os.sep, "/"))
         else:
             root_xml_node.set("root", ".")
+
+        if self.autoexportdir:
+            root_xml_node.set("export", self.autoexportdir.replace(os.sep, "/"))
+        else:
+            root_xml_node.set("export", ".")
 
         self.rootnode.save(root_xml_node)
         tree = ET.ElementTree(root_xml_node)

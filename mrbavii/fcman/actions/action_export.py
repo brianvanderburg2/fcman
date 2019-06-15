@@ -18,14 +18,16 @@ from .base import ActionBase
 
 class ExportAction(ActionBase):
     """ Dump information about the collection. """
-    # TODO: need option to control where files are generated.
-
     ACTION_NAME = "export"
     ACTION_DESC = "Export information"
 
     def run(self):
-        md5file = os.path.join(self.program.collection.root, "md5sums.txt")
-        infofile = os.path.join(self.program.collection.root, "info.txt")
+        # Make directory if needed
+        if not os.path.isdir(self.program.collection.exportdir):
+            os.makedirs(self.program.collection.exportdir)
+
+        md5file = os.path.join(self.program.collection.exportdir, "md5sums.txt")
+        infofile = os.path.join(self.program.collection.exportdir, "info.txt")
 
         md5stream = util.TextFile(md5file)
         infostream = util.TextFile(infofile)
