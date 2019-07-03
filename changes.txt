@@ -7,6 +7,9 @@ Changed
 
 Added
 -----
+* The export directory can now be specified relative to the collection's data
+  file.  This permits controlling where exported files and backups are created.
+
 * The data file can specify a relative path to the collection's root directory.
   This permits the data file to be stored externally to the collection.
 
