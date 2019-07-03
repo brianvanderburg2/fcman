@@ -26,6 +26,7 @@ class InitAction(ActionBase):
         # can't use self.program.file or self.program.collection
         coll = collection.Collection()
         coll.set_root(".")
+        coll.set_exportdir(".")
         if self.options.root is not None:
             coll.autoroot = self.options.root
 
