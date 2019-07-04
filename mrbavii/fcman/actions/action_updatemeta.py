@@ -57,7 +57,7 @@ class _MetaInfo(object):
             for i in provides:
                 parts = i.split(":")
                 name = parts[0]
-                version = parts[1] if len(parts) > 1 and len(parts[1]) else ""
+                version = parts[1] if len(parts) > 1 and parts[1] else ""
                 meta.meta.add(frozenset((
                     ("type", "provides"),
                     ("name", name),
@@ -70,8 +70,8 @@ class _MetaInfo(object):
             for i in depends:
                 parts = i.split(":")
                 name = parts[0]
-                minversion = parts[1] if len(parts) > 1 and len(parts[1]) else ""
-                maxversion = parts[2] if len(parts) > 2 and len(parts[2]) else ""
+                minversion = parts[1] if len(parts) > 1 and parts[1] else ""
+                maxversion = parts[2] if len(parts) > 2 and parts[2] else ""
                 meta.meta.add(frozenset((
                     ("type", "depends"),
                     ("name", name),
@@ -112,7 +112,7 @@ class _MetaInfo(object):
     def apply_version(self, version):
         """ Apply a version to the autonames if specified. """
         if not self.autoname:
-            return
+            return None
 
         result = set()
         for name in self.autoname:
@@ -266,16 +266,16 @@ class UpdateMetaAction(ActionBase):
             patterns = meta.pattern.split(",")
             for pattern in patterns:
                 # Split by "/" and create regex for each path component
-                parts = []
+                regex = []
                 for part in pattern.split("/"):
-                    if part == ".":
-                        parts.append(True) # Special flag to indicate the "."
+                    if part in (".", ".."):
+                        regex.append(part) # just pass through the . and ..
                     else:
-                        parts.append(fnmatch.translate(part).replace(
+                        regex_str = fnmatch.translate(part).replace(
                             "FILEVERSION",
                             "(?P<version>[0-9\\.]+)"
-                        ))
-                regex = [re.compile(part) if part is not True else True for part in parts]
+                        )
+                        regex.append(re.compile(regex_str))
 
                 # Recursively apply meta using regex list
                 self._applymeta_walk(parent, regex, meta)
@@ -285,11 +285,19 @@ class UpdateMetaAction(ActionBase):
     def _applymeta_walk(self, node, regex, meta, _version=None):
         """ Apply the metadata to the matching nodes. """
 
-        if len(regex) == 0:
+        if not regex:
             return
 
+        # Check for "." and ".."
+        while regex and regex[0] in (".", ".."):
+            if regex.pop(0) == "..":
+                if node.parent:
+                    node = node.parent
+                else:
+                    pass # TODO: ERROR
+
         # Check if the meta applies to this directory
-        if len(regex) == 1 and regex[0] is True:
+        if not regex: # After any . and .., nothing left
             meta.users.append(node)
             self.addmeta(node, meta, meta.meta)
             return
