@@ -212,10 +212,15 @@ class Program(object):
 
     def find_file(self):
         """ Use our options to find file. """
+
+        # Don't use os.path.isfile, it fails on device files from command
+        # substitution such as:
+        # mrbavii-fcman -f <(unxz history.xml.xz> findpath / "..."
+
         if not self.options.walk:
             # In this mode, file directly specified
             filename = os.path.normpath(self.options.file)
-            if os.path.isfile(filename):
+            if os.path.exists(filename):
                 return filename
             return None
 
@@ -223,7 +228,7 @@ class Program(object):
         head = self.cwd
         while head:
             filename = os.path.join(head, self.options.file)
-            if os.path.isfile(filename):
+            if os.path.exists(filename):
                 return os.path.relpath(filename) # relpath to keep it pretty
 
             (head, tail) = os.path.split(head)
