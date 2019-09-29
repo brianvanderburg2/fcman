@@ -9,6 +9,8 @@ __license__ = "MIT License"
 __all__ = ["ACTIONS"]
 
 
+import os
+
 from .. import collection
 from .base import ActionBase
 from .action_checkmeta import CheckMetaAction as CMA
@@ -93,6 +95,10 @@ class DepMapAction(ActionBase):
 
             for (node, version) in package_nodes:
 
+                # if package doesn't have a version but we need a version then it fails
+                if version is None and (minversion is not None or maxversion is not None):
+                    continue
+
                 if minversion is not None and CMA._checkdeps_compare(version, minversion) < 0:
                     continue
 
@@ -104,7 +110,7 @@ class DepMapAction(ActionBase):
 
         # Now we have our links, generate the output
         diag = self.__build_diag(info)
-        self.__save_diag(diag)
+        return self.__save_diag(diag)
 
 
     def __scan_nodes(self, node, info):
@@ -125,6 +131,8 @@ class DepMapAction(ActionBase):
                 continue
 
             version = package.get("version", None)
+            if version == "":
+                version = None
 
             interesting = True
 
@@ -134,15 +142,24 @@ class DepMapAction(ActionBase):
         # For each dependency, create a dependency diagram node if one does not
         # already exist and remember the dependency diagram nodes for this item
         for depends in node.getmeta("depends"):
-            key = (
+            key = [
                 depends.get("name"),
                 depends.get("minversion"),
                 depends.get("maxversion")
-            )
+            ]
             if key[0] is None:
                 continue
 
             interesting = True
+
+            # Make min/max None for easy checking 
+            if key[1] == "":
+                key[1] = None
+            if key[2] == "":
+                key[2] = None
+
+            key = tuple(key)
+
 
             dep_diag_node = info.dep_diag_nodes.get(key, None)
             if dep_diag_node is None:
@@ -161,7 +178,18 @@ class DepMapAction(ActionBase):
                 self.__scan_nodes(node.children[child], info)
 
     @staticmethod
-    def __build_diag(info):
+    def __calc_labels(labels):
+        """ Calculate the width/height needed for the labels. """
+        lines = len(labels)
+        chars = max(len(label) for label in labels)
+
+        width = chars * 10
+        height = lines * 22
+
+        return (width, height)
+
+    @classmethod
+    def __build_diag(cls, info):
         """ Build the blockdiag code. """
 
         lines = ["blockdiag {"]
@@ -169,10 +197,33 @@ class DepMapAction(ActionBase):
         # First our labels
         for collection_node in info.node_diag_nodes:
             diag_node = info.node_diag_nodes[collection_node]
+            label_parts = [collection_node.prettypath]
+            for package in collection_node.getmeta("provides"):
+                (name, version) = (
+                    package.get("name"),
+                    package.get("version")
+                )
+
+                if name in (None, ""):
+                    continue
+    
+                if version not in (None, ""):
+                    label_parts.append(
+                        "Package: {0}:{1}".format(name, version)
+                    )
+                else:
+                    label_parts.append(
+                        "Package: {0}".format(name)
+                    )
+
+            (w, h) = cls.__calc_labels(label_parts)
+
             lines.append(
-                "{0} [label=\"{1}\"];".format(
+                "{0} [label=\"{1}\",width={2},height={3}];".format(
                     diag_node.id,
-                    collection_node.prettypath
+                    "\\n".join(label_parts),
+                    w,
+                    h
                 )
             )
 
@@ -190,11 +241,15 @@ class DepMapAction(ActionBase):
             else:
                 color = "pink"
 
+            (w, h) = cls.__calc_labels([label])
+
             lines.append(
-                "{0} [label=\"{1}\", color=\"{2}\"];".format(
+                "{0} [label=\"{1}\",color=\"{2}\",width={3},height={4}];".format(
                     dep_diag_node.id,
                     label,
-                    color
+                    color,
+                    w,
+                    h
                 )
             )
 
@@ -223,7 +278,36 @@ class DepMapAction(ActionBase):
 
         return "\n".join(lines)
 
-    def __save_diag(self, diag):
-        print(diag)
+    def __save_diag(self, source):
+        try:
+            from blockdiag import parser, builder, drawer
+        except ImportError:
+            self.writer.stderr.status("", "Python blockdiag not installed.")
+            return False
+
+        if not os.path.isdir(self.program.collection.exportdir):
+            os.makedirs(self.program.collection.exportdir)
+
+        diagfile = os.path.join(
+            self.program.collection.exportdir,
+            "depmap"
+        )
+
+        opt_type = self.program.options.type.lower()
+        if opt_type in ("jpg", "jpeg"):
+            type = "JPEG"
+            diagfile += ".jpg"
+        elif opt_type == "png":
+            type = "PNG"
+            diagfile += ".png"
+        elif opt_type == "svg":
+            type = "SVG"
+            diagfile += ".svg"
+
+        tree = parser.parse_string(source)
+        diagram = builder.ScreenNodeBuilder.build(tree)
+        draw = drawer.DiagramDraw(type, diagram, filename=diagfile)
+        draw.draw()
+        draw.save()
 
 ACTIONS = [DepMapAction]
