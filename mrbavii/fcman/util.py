@@ -105,6 +105,20 @@ class LogWriter(StreamWriter):
                 self.writeln("> " + msg)
 
 
+    def statusline(self, path, status, msg):
+        """ Write a status line for a given path/status pair.
+            What this does is, if the last path/status doesn't match the
+            current, is writes a plain path/status by itself, so that the
+            status line appears in the " > " section of the output.
+        """
+
+        check = (path, status)
+        if check != self._last:
+            self.status(path, status)
+        self.status(path, status, msg)
+
+
+
 class TextFile(StreamWriter):
     """ A text file based on StreamWriter. """
 
