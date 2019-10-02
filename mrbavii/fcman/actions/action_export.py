@@ -89,26 +89,26 @@ class ExportAction(ActionBase):
         tags = set()
         descriptions = []
 
-        for meta in node.getmeta():
+        for meta in node.meta.get():
             type = meta.get("type") # pylint: disable=redefined-builtin
             if not type:
                 continue
 
             if type == "provides":
                 provides.append((
-                    meta.get("name"),
+                    meta.get("name", ""),
                     meta.get("version")
                 ))
             elif type == "depends":
                 depends.append((
-                    meta.get("name"),
+                    meta.get("name", ""),
                     meta.get("minversion"),
                     meta.get("maxversion")
                 ))
             elif type == "tag":
-                tags.add(meta.get("tag"))
+                tags.add(meta.get("tag", ""))
             elif type == "description":
-                descriptions.append(meta.get("description"))
+                descriptions.append(meta.get("description", ""))
 
         if provides:
             streams[1].writeln("Provides: {0}".format(

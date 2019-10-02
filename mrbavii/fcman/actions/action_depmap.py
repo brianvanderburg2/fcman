@@ -125,41 +125,29 @@ class DepMapAction(ActionBase):
         dep_diag_nodes_ids = []
 
         # For each provides name, add to the info provides list
-        for package in node.getmeta("provides"):
+        for package in node.meta.get("provides"):
             name = package.get("name", None)
             if name is None:
                 continue
 
-            version = package.get("version", None)
-            if version == "":
-                version = None
-
             interesting = True
+            version = package.get("version", None)
 
             info_package_list = info.provided_packages.setdefault(name, [])
             info_package_list.append((node, version))
 
         # For each dependency, create a dependency diagram node if one does not
         # already exist and remember the dependency diagram nodes for this item
-        for depends in node.getmeta("depends"):
-            key = [
+        for depends in node.meta.get("depends"):
+            key = (
                 depends.get("name"),
                 depends.get("minversion"),
                 depends.get("maxversion")
-            ]
+            )
             if key[0] is None:
                 continue
 
             interesting = True
-
-            # Make min/max None for easy checking 
-            if key[1] == "":
-                key[1] = None
-            if key[2] == "":
-                key[2] = None
-
-            key = tuple(key)
-
 
             dep_diag_node = info.dep_diag_nodes.get(key, None)
             if dep_diag_node is None:
@@ -198,16 +186,16 @@ class DepMapAction(ActionBase):
         for collection_node in info.node_diag_nodes:
             diag_node = info.node_diag_nodes[collection_node]
             label_parts = [collection_node.prettypath]
-            for package in collection_node.getmeta("provides"):
+            for package in collection_node.meta.get("provides"):
                 (name, version) = (
                     package.get("name"),
                     package.get("version")
                 )
 
-                if name in (None, ""):
+                if name is None:
                     continue
     
-                if version not in (None, ""):
+                if version is not None:
                     label_parts.append(
                         "Package: {0}:{1}".format(name, version)
                     )

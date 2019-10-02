@@ -28,7 +28,7 @@ class _MetaInfo(object):
         self.name = None
         self.pattern = None
         self.autoname = []
-        self.meta = set()
+        self.meta = collection.NodeMeta()
 
         self.target = options.get("target", ".")
 
@@ -58,11 +58,10 @@ class _MetaInfo(object):
                 parts = i.split(":")
                 name = parts[0]
                 version = parts[1] if len(parts) > 1 and parts[1] else ""
-                meta.meta.add(frozenset((
-                    ("type", "provides"),
-                    ("name", name),
-                    ("version", version)
-                )))
+                meta.meta.add(
+                    "provides",
+                    {"name": name, "version": version}
+                )
 
         # depends
         if "depends" in config:
@@ -72,40 +71,38 @@ class _MetaInfo(object):
                 name = parts[0]
                 minversion = parts[1] if len(parts) > 1 and parts[1] else ""
                 maxversion = parts[2] if len(parts) > 2 and parts[2] else ""
-                meta.meta.add(frozenset((
-                    ("type", "depends"),
-                    ("name", name),
-                    ("minversion", minversion),
-                    ("maxversion", maxversion)
-                )))
+                meta.meta.add(
+                    "depends",
+                    {"name": name, "minversion": minversion, "maxversion": maxversion}
+                )
 
 
         # tags
         if "tags" in config:
             tags = util.splitval(config["tags"])
             for tag in tags:
-                meta.meta.add(frozenset((
-                    ("type", "tag"),
-                    ("tag", tag)
-                )))
+                meta.meta.add(
+                    "tag",
+                    {"tag": tag}
+                )
 
         # description
         if "description" in config:
             desc = config["description"].strip()
             desc = " ".join([line.strip() for line in desc.splitlines() if len(line)])
-            meta.meta.add(frozenset((
-                ("type", "description"),
-                ("description", desc)
-            )))
+            meta.meta.add(
+                "description",
+                {"description": desc}
+            )
 
         # ignore
         if "ignore" in config:
             ignores = util.splitval(config["ignore"])
             for ignore in ignores:
-                meta.meta.add(frozenset((
-                    ("type", "ignore"),
-                    ("pattern", ignore)
-                )))
+                meta.meta.add(
+                    "ignore",
+                    {"pattern": ignore}
+                )
 
         return meta
 
@@ -114,13 +111,12 @@ class _MetaInfo(object):
         if not self.autoname:
             return None
 
-        result = set()
+        result = collection.NodeMeta()
         for name in self.autoname:
-            result.add(frozenset((
-                ("type", "provides"),
-                ("name", name),
-                ("version", version)
-            )))
+            result.add(
+                "provides",
+                {"name": name, "version": version}
+            )
 
         return result
 
@@ -210,7 +206,7 @@ class UpdateMetaAction(ActionBase):
 
     def resetmeta(self, node):
         """ Clear the meta of a node and all child nodes. """
-        node.clearmeta()
+        node.meta.clear()
         if isinstance(node, collection.Directory):
             for child in node.children:
                 self.resetmeta(node.children[child])
@@ -330,9 +326,8 @@ class UpdateMetaAction(ActionBase):
         """ Add the metadata to the node. """
 
         # Accumulate the new meta
-        for entry in values:
-            entry = dict(entry)
-            node.addmeta(entry.get("type", ""), entry)
+        for entry in values.get():
+            node.meta.add(entry.get("type", ""), entry)
 
         # Log
         if self.verbose:
@@ -340,8 +335,8 @@ class UpdateMetaAction(ActionBase):
                 node.prettypath,
                 "META", "FROM: {0}:{1}".format(meta.node.prettypath, meta.name)
             )
-            for entry in values:
-                self.writer.stdout.status(node.prettypath, "META", str(dict(entry)))
+            for entry in values.get():
+                self.writer.stdout.status(node.prettypath, "META", str(entry))
 
 
 ACTIONS = [UpdateMetaAction]

@@ -37,14 +37,12 @@ class CheckMetaAction(ActionBase):
         return self._checkdeps_walk(self.program.collection.rootnode, packages)
 
     def _checkdeps_walk_collect(self, node, packages):
-        for meta in node.getmeta("provides"):
+        for meta in node.meta.get("provides"):
             name = meta.get("name")
             if not name:
                 continue
 
             version = meta.get("version")
-            if not version:
-                version = None
 
             if not name in packages:
                 packages[name] = set()
@@ -58,7 +56,7 @@ class CheckMetaAction(ActionBase):
     def _checkdeps_walk(self, node, packages):
         status = True
 
-        for meta in node.getmeta("depends"):
+        for meta in node.meta.get("depends"):
 
             name = meta.get("name")
             if not name:
@@ -66,11 +64,6 @@ class CheckMetaAction(ActionBase):
 
             minver = meta.get("minversion")
             maxver = meta.get("maxversion")
-            if not minver:
-                minver = None
-            if not maxver:
-                maxver = None
-
             depends = (name, minver, maxver)
 
             if not self._checkdeps_find(depends, packages):

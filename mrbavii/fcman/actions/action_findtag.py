@@ -53,7 +53,7 @@ class FindTagAction(ActionBase):
 
         alltags = set(
             meta.get("tag", "").lower()
-            for meta in node.getmeta("tag")
+            for meta in node.meta.get("tag")
         )
         findtags = set(tag.lower() for tag in self.options.tags)
 

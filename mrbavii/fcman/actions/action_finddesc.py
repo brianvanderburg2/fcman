@@ -53,7 +53,7 @@ class FindDescAction(ActionBase):
 
         alldescs = " ".join(
             meta.get("description", "").lower()
-            for meta in node.getmeta("description")
+            for meta in node.meta.get("description")
         )
         finddescs = set(i.lower() for i in self.options.descs)
         found = set()

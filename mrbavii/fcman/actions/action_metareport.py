@@ -94,14 +94,12 @@ class MetaReportAction(ActionBase):
         """ Scan nodes to collect information (first pass) """
 
         # Just determine the package of the node.
-        for meta in node.getmeta("provides"):
+        for meta in node.meta.get("provides"):
             name = meta.get("name")
             version = meta.get("version")
 
-            if name in ("", None):
+            if name is None:
                 continue
-            if version == "":
-                version = None
 
             packages_list = self._packages.setdefault(name, [])
             packages_list.append((node, version))
@@ -118,7 +116,7 @@ class MetaReportAction(ActionBase):
         # Description
         if "A" in self._report_type or "D" in self._report_type:
             desc = []
-            for meta in node.getmeta("description"):
+            for meta in node.meta.get("description"):
                 value = meta.get("description")
                 if value is None:
                     continue
@@ -135,9 +133,9 @@ class MetaReportAction(ActionBase):
         # Tags:
         if "A" in self._report_type or "T" in self._report_type:
             first = True
-            for meta in node.getmeta("tag"):
+            for meta in node.meta.get("tag"):
                 tag = meta.get("tag")
-                if tag in ("", None):
+                if tag is None:
                     continue
 
                 if first:
@@ -149,12 +147,12 @@ class MetaReportAction(ActionBase):
         # Packages:
         if "A" in self._report_type or "P" in self._report_type:
             first = True
-            for meta in node.getmeta("provides"):
+            for meta in node.meta.get("provides"):
                 name = meta.get("name")
                 version = meta.get("version")
-                if name in ("", None):
+                if name is None:
                     continue
-                if version in ("", None):
+                if version is None:
                     version = ""
                 else:
                     version = ":" + version
@@ -170,17 +168,13 @@ class MetaReportAction(ActionBase):
         # Dependencies
         if "A" in self._report_type or "E" in self._report_type:
             first = True
-            for meta in node.getmeta("depends"):
+            for meta in node.meta.get("depends"):
                 name = meta.get("name")
                 minver = meta.get("minversion")
                 maxver = meta.get("maxversion")
 
-                if name in ("", None):
+                if name is None:
                     continue
-                if minver == "":
-                    minver = None
-                if maxver == "":
-                    maxver = None
 
                 # Accumulate satisfying packages
                 satisfiers = []
@@ -221,9 +215,8 @@ class MetaReportAction(ActionBase):
         # Other unknown tags
         if "A" in self._report_type or "O" in self._report_type:
             first = True
-            for meta in node.getmeta():
-                type = meta.get("type")
-                if type in ("description", "tag", "provides", "depends"):
+            for meta in node.meta.get():
+                if meta.get("type") in ("description", "tag", "provides", "depends"):
                     continue
 
                 if first:

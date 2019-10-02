@@ -18,6 +18,66 @@ except ImportError:
     from xml.etree import ElementTree as ET
 
 
+class NodeMeta(object):
+    """ Represent the metadata for a node. """
+
+    def __init__(self):
+        self._meta = dict()
+
+    def __bool__(self):
+        return bool(self._meta)
+
+    __nonzero__ = __bool__
+
+    def add(self, metatype, metadata):
+        """ Add metadata to the node. """
+        metadata = dict(metadata)
+        metadata["type"] = metatype.strip()
+
+        # to prevent duplicates they are stored as a set of frozen sets
+        metaset = self._meta.setdefault(metatype, set())
+        metaset.add(frozenset(metadata.items()))
+
+    def get(self, metatypes=None, strip=True):
+        """ Iterate over the metadata of a given type or all metadata.
+            If strip is True (default), any empty values will be removed. """
+        if metatypes is None:
+            metatypes = sorted(self._meta.keys())
+        elif not isinstance(metatypes, (tuple, list)):
+            metatypes = [metatypes]
+
+        for metatype in metatypes:
+            for metaentry in self._meta.get(metatype, ()):
+                if strip:
+                    metadict = {
+                        k : v.strip()
+                        for (k, v) in metaentry
+                        if v is not None and v.strip()
+                    }
+                else:
+                    metadict = dict(metaentry)
+
+                yield metadict
+
+    def clear(self, metatype=None):
+        """ Clear metadata. """
+        if metatype is None:
+            self._meta.pop(metatype, None)
+        else:
+            self._meta.clear()
+
+    def load(self, xml):
+        for child in xml:
+            if child.tag == "meta":
+                metatype = child.get("type", "").strip()
+                if metatype:
+                    self.add(metatype, child.items())
+
+    def save(self, xml):
+        for metaentry in self.get(strip=False):
+            ET.SubElement(xml, "meta", attrib=metaentry)
+
+
 class Node(object):
     """ A node represents a file, symlink, or directory in the collection. """
 
@@ -25,7 +85,7 @@ class Node(object):
         """ Initialize the node with the parent and name. """
         self.name = name
         self.parent = parent
-        self.meta = dict()
+        self.meta = NodeMeta()
 
         if parent is not None:
             parent.children[name] = self
@@ -50,51 +110,13 @@ class Node(object):
             separated by a forward slash. """
         return "/" + "/".join(self.pathlist)
 
-    # Load and save meta
-    def _loadmeta(self, xml):
-        """ Load metadata for node. """
-        self.meta = dict()
-        for child in xml:
-            if child.tag == "meta":
-                metatype = child.get("type", "")
-                metaset = self.meta.setdefault(metatype, set())
-                metaset.add(frozenset(child.items()))
-
-    def _savemeta(self, xml):
-        """ Save metadata to xml. """
-        for metatype in sorted(self.meta):
-            for meta in self.meta[metatype]:
-                ET.SubElement(xml, "meta", attrib=dict(meta))
-
-    def addmeta(self, metatype, metadata):
-        """ Add metadata. """
-        metadata = dict(metadata)
-        metadata["type"] = metatype
-
-        metaset = self.meta.setdefault(metatype, set())
-        metaset.add(frozenset(metadata.items()))
-
-    def getmeta(self, metatype=None):
-        """ Get metadata.  Generator yields dict for each metadata. """
-        if metatype is not None:
-            for metaset in self.meta.get(metatype, ()):
-                yield dict(metaset)
-        else:
-            for metatype in sorted(self.meta):
-                for metaset in self.meta[metatype]:
-                    yield dict(metaset)
-
-    def clearmeta(self):
-        """ Clear metadata. """
-        self.meta = dict()
-
     # Load and save
     @classmethod
     def load(cls, parent, xml):
         """ Load the node from the XML and load metadata from that. """
         # pylint: disable=protected-access
         node = cls._load(parent, xml)
-        node._loadmeta(xml)
+        node.meta.load(xml)
 
         return node
 
@@ -106,7 +128,7 @@ class Node(object):
 
     def save(self, xml):
         """ Save the node and metadata to the XML element. """
-        self._savemeta(xml)
+        self.meta.save(xml)
         return self._save(xml)
 
     def _save(self, xml):
@@ -332,7 +354,7 @@ class Directory(Node):
             if fnmatch.fnmatch(name, i):
                 return True
 
-        for meta in self.getmeta("ignore"):
+        for meta in self.meta.get("ignore"):
             if fnmatch.fnmatch(name, meta.get("pattern", "")):
                 return True
 
