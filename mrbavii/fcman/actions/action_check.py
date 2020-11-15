@@ -27,12 +27,24 @@ class CheckAction(ActionBase):
         ActionBase.__init__(self, *args, **kwargs)
         self._fullcheck = False
         self._state = []
+        self._autosave_read = 0
 
     @classmethod
     def add_arguments(cls, parser):
         super(CheckAction, cls).add_arguments(parser)
         parser.add_argument("-s", "--state", dest="state", default=None, help="Path to state file")
+        parser.add_argument("--autosave-bytes", dest="autosave", default=1000000000, type=int, help="How many bytes before autosaving the state file")
         parser.add_argument("path", nargs="?", default=".", help="Path to " + cls.ACTION_NAME)
+
+    @classmethod
+    def parse_arguments(cls, options):
+        super(CheckAction, cls).parse_arguments(options)
+
+        # support range from 1M to 100G
+        if options.autosave < 1000000:
+            options.autosave = 1000000
+        elif options.autosave > 100000000000:
+            options.autosave = 100000000000
 
     def run(self):
         self._load_state()
@@ -47,7 +59,6 @@ class CheckAction(ActionBase):
         if node is None:
             self.writer.stderr.status(path, "NONODE")
             return False
-
 
         if isinstance(node, collection.Symlink):
             result = self.handle_symlink(node)
@@ -106,6 +117,14 @@ class CheckAction(ActionBase):
                     # checksum verified add to state to avoid checking again
                     # if user wants to verify over multiple runs
                     self._state.append(node.prettypath)
+
+            # autosave if needed but don't count sizes of skipped files
+            if do_verify and self.options.state:
+                self._autosave_read += stat.st_size
+                if self._autosave_read > self.options.autosave:
+                    self._save_state()
+                    while self._autosave_read > self.options.autosave:
+                        self._autosave_read -= self.options.autosave
 
         return status
 
