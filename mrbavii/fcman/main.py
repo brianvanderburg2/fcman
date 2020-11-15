@@ -17,6 +17,7 @@ __license__ = "MIT"
 
 import argparse
 import os
+import signal
 import sys
 
 from . import util
@@ -29,6 +30,13 @@ if sys.version_info[0:2] < (3, 2):
     sys.exit("This program requires Python 3.2 or greater")
 
 
+# modify the default keyboard interrup exception
+def sigint_print_and_exit(*args):
+    sys.stderr.write("Aborted by Interrupt\n")
+    sys.exit(-1)
+signal.signal(signal.SIGINT, sigint_print_and_exit)
+
+
 class VerboseChecker(object):
     """ A small class whose boolean value depends on verbose or a signal. """
 
@@ -37,7 +45,6 @@ class VerboseChecker(object):
         self._signalled = False
 
         try:
-            import signal
             signal.signal(signal.SIGUSR1, self._signal)
         except ImportError:
             pass
@@ -65,7 +72,6 @@ class Program(object):
         self.options = None
         self.verbose = None
         self.writer = None
-
 
     @staticmethod
     def create_arg_parser():
@@ -124,8 +130,18 @@ class Program(object):
             if not self.load_file():
                 return -1
 
-        if not action(self).run():
-            return -1
+        def sigint_handler(*args):
+            # if acton handles the signal, don't abort
+            if action_obj.handle_sigint() != True:
+                orig_handler(*args)
+
+        action_obj = action(self)
+        orig_handler = signal.signal(signal.SIGINT, sigint_handler)
+        try:
+            if not action_obj.run():
+                return -1
+        finally:
+            signal.signal(signal.SIGINT, orig_handler)
 
         if self.collection and self.collection.dirty:
             self.save_backup()

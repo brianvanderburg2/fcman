@@ -67,3 +67,7 @@ class ActionBase(object):
         """ Find the exact node or return None. """
         (node, remaining_path) = self.find_nearest_node(path)
         return node if not remaining_path else None
+
+    def handle_sigint(self):
+        """ Handle CTRL-C """
+        pass
