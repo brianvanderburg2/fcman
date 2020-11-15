@@ -9,6 +9,7 @@ __license__ = "MIT License"
 __all__ = ["ACTIONS"]
 
 
+import json
 import os
 
 from .. import collection
@@ -25,13 +26,17 @@ class CheckAction(ActionBase):
     def __init__(self, *args, **kwargs):
         ActionBase.__init__(self, *args, **kwargs)
         self._fullcheck = False
+        self._state = []
 
     @classmethod
     def add_arguments(cls, parser):
         super(CheckAction, cls).add_arguments(parser)
+        parser.add_argument("-s", "--state", dest="state", default=None, help="Path to state file")
         parser.add_argument("path", nargs="?", default=".", help="Path to " + cls.ACTION_NAME)
 
     def run(self):
+        self._load_state()
+
         path = self.normalize_path(self.options.path)
         if path is None:
             return False
@@ -45,13 +50,16 @@ class CheckAction(ActionBase):
 
 
         if isinstance(node, collection.Symlink):
-            return self.handle_symlink(node)
+            result = self.handle_symlink(node)
         elif isinstance(node, collection.File):
-            return self.handle_file(node)
+            result = self.handle_file(node)
         elif isinstance(node, collection.Directory):
-            return self.handle_directory(node)
+            result = self.handle_directory(node)
         else:
-            return False
+            result = False
+
+        self._save_state()
+        return result
 
     def _missing_dir(self, node):
         for i in sorted(node.children):
@@ -82,11 +90,22 @@ class CheckAction(ActionBase):
             self.writer.stdout.status(node.prettypath, 'SIZE')
 
         if self._fullcheck:
+            do_verify = node.prettypath not in self._state
+
             if self.verbose:
-                self.writer.stdout.status(node.prettypath, 'PROCESSING')
-            if node.checksum != node.calc_checksum():
-                status = False
-                self.writer.stdout.status(node.prettypath, 'CHECKSUM')
+                if do_verify:
+                    self.writer.stdout.status(node.prettypath, 'PROCESSING')
+                else:
+                    self.writer.stdout.status(node.prettypath, 'SKIPPED')
+
+            if do_verify:
+                if node.checksum != node.calc_checksum():
+                    status = False
+                    self.writer.stdout.status(node.prettypath, 'CHECKSUM')
+                else:
+                    # checksum verified add to state to avoid checking again
+                    # if user wants to verify over multiple runs
+                    self._state.append(node.prettypath)
 
         return status
 
@@ -145,6 +164,48 @@ class CheckAction(ActionBase):
                     pass
 
         return status
+
+    def _load_state(self):
+        """ Load the state file. """
+        self._state = []
+
+        if self.options.state is None:
+            return True
+
+        state_file = os.path.join(
+            self.program.iwd,
+            self.options.state
+        )
+
+        try:
+            if os.path.exists(state_file):
+                with open(state_file, "rt") as handle:
+                    # state is stored as json to be able to support filename
+                    # containing any charachers including new lines
+                    self._state = json.load(handle)
+
+            if not isinstance(self._state, list):
+                return False
+
+        except (IOError, OSError, json.JSONDecodeError):
+            return False
+
+    def _save_state(self):
+        """ Save the state file. """
+        if self.options.state is None:
+            return
+
+        state_file = os.path.join(
+            self.program.iwd,
+            self.options.state
+        )
+
+        with open(state_file, "wt") as handle:
+            json.dump(self._state, handle)
+
+    def handle_sigint(self):
+        """ Save any state on SIGINT """
+        self._save_state()
 
 
 class VerifyAction(CheckAction):

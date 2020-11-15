@@ -67,6 +67,7 @@ class Program(object):
     def __init__(self):
         """ Initialize the program object. """
         self.collection = None
+        self.iwd = None # The initial working directory before any chdir
         self.cwd = None
         self.file = None # The actual file loaded (options.file is the file to search for)
         self.options = None
@@ -111,6 +112,8 @@ class Program(object):
         self.writer = writer = util.StdStreamWriter()
 
         # Handle current directory
+        self.iwd = os.getcwd()
+
         if options.chdir:
             if verbose:
                 writer.stdout.status(options.chdir, "CHDIR")
