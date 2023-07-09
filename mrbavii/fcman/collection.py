@@ -61,7 +61,7 @@ class NodeMeta(object):
 
     def clear(self, metatype=None):
         """ Clear metadata. """
-        if metatype is None:
+        if metatype is not None:
             self._meta.pop(metatype, None)
         else:
             self._meta.clear()
