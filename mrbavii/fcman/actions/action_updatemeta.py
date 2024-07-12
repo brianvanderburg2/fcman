@@ -264,8 +264,8 @@ class UpdateMetaAction(ActionBase):
                 # Split by "/" and create regex for each path component
                 regex = []
                 for part in pattern.split("/"):
-                    if part in (".", ".."):
-                        regex.append(part) # just pass through the . and ..
+                    if part in (".", "..", "**"):
+                        regex.append(part) # just pass through the ., .., and **
                     else:
                         regex_str = fnmatch.translate(part).replace(
                             "FILEVERSION",
@@ -294,9 +294,19 @@ class UpdateMetaAction(ActionBase):
 
         # Check if the meta applies to this directory
         if not regex: # After any . and .., nothing left
-            meta.users.append(node)
-            self.addmeta(node, meta, meta.meta)
+            if not node in meta.users:
+                meta.users.append(node)
+                self.addmeta(node, meta, meta.meta)
             return
+
+        # deal with '**'
+        recurse = False
+        if regex[0] == '**':
+            recurse = True
+            regex.pop(0)
+            if not regex:
+                return # should have soemthing after a '**' section
+
 
         # Find matching child nodes
         for name in sorted(node.children):
@@ -313,14 +323,20 @@ class UpdateMetaAction(ActionBase):
 
                 if len(regex) == 1:
                     # last part of the regex so it applies to the found node
-                    meta.users.append(child)
-                    self.addmeta(child, meta, meta.meta)
-                    if _version is not None:
-                        self.addmeta(child, meta, meta.apply_version(_version))
+                    if not node in meta.users:
+                        meta.users.append(child)
+                        self.addmeta(child, meta, meta.meta)
+                        if _version is not None:
+                            self.addmeta(child, meta, meta.apply_version(_version))
 
                 elif len(regex) > 1 and isinstance(child, collection.Directory):
                     # more nested regex to match, recurse if node is directory
                     self._applymeta_walk(child, regex[1:], meta, _version)
+
+            if recurse and isinstance(child, collection.Directory):
+                # more nested regex to match, recurse if node is directory
+                self._applymeta_walk(child, ['**'] + regex, meta, _version)
+
 
     def addmeta(self, node, meta, values):
         """ Add the metadata to the node. """
