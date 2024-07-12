@@ -159,9 +159,7 @@ class ExportAction(ActionBase):
         for tag in tags:
             parts = tag.split("/")
             for i in range(len(parts)):
-                parts[i] = re.sub("[^a-zA-z ]+", "", parts[i])
-                parts[i] = parts[i].strip()
-                parts[i] = re.sub(" +", "_", parts[i])
+                parts[i] = re.sub("[^a-zA-z0-9_-]+", "", parts[i])
 
             tagdir = os.path.join(self._tagsdir, *parts)
             if not os.path.isdir(tagdir):
