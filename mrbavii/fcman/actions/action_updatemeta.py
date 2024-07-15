@@ -147,31 +147,18 @@ class UpdateMetaAction(ActionBase):
 
         return True
 
-    def loadmeta(self, node, force=False):
+    def loadmeta(self, node):
         status = True
         for i in sorted(node.children):
             child = node.children[i]
 
-            if i == "fcmeta.ini":
+            if i == "fcmeta.ini" or i.endswith(".fcmeta"):
                 # Handle the special name "fcmeta.ini"
-                if isinstance(child, collection.Directory):
-                    # if directory is named fcmeta.ini, all INI files under
-                    # are loaded recursively
-                    if not self.loadmeta(child, True):
-                        status = False
-                else:
-                    # Just load the INI file
-                    if not self._loadmeta(child):
-                        status = False
-
-            elif isinstance(child, collection.Directory):
-                # Not fcmeta.ini, process subdirs with same force setting
-                if not self.loadmeta(child, force):
+                if not self._loadmeta(child):
                     status = False
 
-            elif force and i.lower().endswith(".ini") and not i[0:1] in (".", "~"):
-                # If force is enabled the load all other INI files as well
-                if not self._loadmeta(child):
+            elif isinstance(child, collection.Directory):
+                if not self.loadmeta(child):
                     status = False
 
         return status
@@ -195,11 +182,17 @@ class UpdateMetaAction(ActionBase):
 
         # Handle the sections
         sections = config.sections()
-        for name in sections:
-            if name == "fcman:fcmeta": # Skip options section
+        for section_name in sections:
+            if section_name == "fcman:fcmeta": # Skip options section
                 continue
 
-            meta = _MetaInfo.load(node, name, dict(config.items(name)), options)
+            # @BASENAME@ replaced anything ending with ".fcmeta" with just the base
+            if section_name == "@BASENAME@" and node.name.endswith(".fcmeta"):
+                name = node.name[:-7]
+            else:
+                name = section_name
+
+            meta = _MetaInfo.load(node, name, dict(config.items(section_name)), options)
             self._allmeta.append(meta)
 
         return True
@@ -268,7 +261,7 @@ class UpdateMetaAction(ActionBase):
                         regex.append(part) # just pass through the ., .., and **
                     else:
                         regex_str = fnmatch.translate(part).replace(
-                            "FILEVERSION",
+                            "@FILEVERSION@",
                             "(?P<version>[0-9\\.]+)"
                         )
                         regex.append(re.compile(regex_str))
