@@ -28,12 +28,6 @@ class ExportAction(ActionBase):
         if not os.path.isdir(self.program.collection.exportdir):
             os.makedirs(self.program.collection.exportdir)
 
-        # Clear tags directory if needed
-        self._tagsdir = os.path.join(self.program.collection.exportdir, "_tags")
-        if os.path.isdir(self._tagsdir):
-            shutil.rmtree(self._tagsdir)
-        os.makedirs(self._tagsdir)
-
         md5file = os.path.join(self.program.collection.exportdir, "md5sums.txt")
         infofile = os.path.join(self.program.collection.exportdir, "info.txt")
 
@@ -144,7 +138,6 @@ class ExportAction(ActionBase):
             streams[1].writeln("Tags: {0}".format(
                 ", ".join(sorted(tags))
             ))
-            self._dumptags(node, tags)
 
         descriptions = "\n".join(descriptions) # pylint: disable=redefined-variable-type
         if descriptions:
@@ -153,26 +146,6 @@ class ExportAction(ActionBase):
             streams[1].writeln("Description:\n  {0}".format(
                 "\n  ".join(lines)
             ))
-
-    def _dumptags(self, node, tags):
-        """ Dump the tags for the given node. """
-        for tag in tags:
-            parts = tag.split("/")
-            for i in range(len(parts)):
-                parts[i] = re.sub("[^a-zA-z0-9_-]+", "", parts[i])
-
-            tagdir = os.path.join(self._tagsdir, *parts)
-            if not os.path.isdir(tagdir):
-                os.makedirs(tagdir)
-
-            relpath = os.path.relpath(node.path, tagdir)
-            basename = os.path.basename(node.path)
-            # TODO: if basename exists, ie linked from multiple areas
-            # maybe increment a suffix on it
-            os.symlink(
-                relpath,
-                os.path.join(tagdir, basename)
-            )
 
 
 ACTIONS = [ExportAction]
