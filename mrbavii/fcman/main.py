@@ -128,7 +128,7 @@ class Program(object):
             parser.exit()
 
         action.parse_arguments(options)
-        if action.ACTION_NAME != "init":
+        if action.ACTION_LOAD_COLLECTION:
             # Load the collection if needed
             if not self.load_file():
                 return -1

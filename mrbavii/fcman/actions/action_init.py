@@ -20,6 +20,7 @@ class InitAction(ActionBase):
 
     ACTION_NAME = "init"
     ACTION_DESC = "Initialize a collection."
+    ACTION_LOAD_COLLECTION = False
 
     def run(self):
         # This is a special action, collection is not loaded at this point

@@ -15,6 +15,7 @@ class ActionBase(object):
 
     ACTION_NAME = None
     ACTION_DESC = ""
+    ACTION_LOAD_COLLECTION = True
 
     def __init__(self, program):
         self.program = program
