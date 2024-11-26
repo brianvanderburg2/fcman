@@ -9,6 +9,9 @@ __license__ = "MIT License"
 __all__ = ["ACTIONS"]
 
 
+import fnmatch
+
+
 from .. import collection
 from .base import ActionBase, MultiActionBase
 
@@ -21,12 +24,20 @@ class FindTagMixin:
             meta.get("tag", "").lower()
             for meta in node.meta.get("tag")
         )
-        findtags = set(tag.lower() for tag in self.options.tags)
 
-        found = findtags.intersection(alltags)
+        found = set()
+        missed_one = False
+        for find_tag in self.options.tags:
+            find_tag_found = False
+            for node_tag in alltags:
+                if fnmatch.fnmatch(node_tag, find_tag):
+                    found.add(node_tag)
+                    find_tag_found = True
+            if find_tag_found == False:
+                missed_one = True
 
         if self.options.match_all:
-            matched = (found == findtags)
+            matched = not missed_one
         else:
             matched = len(found) > 0
 
