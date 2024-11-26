@@ -13,10 +13,40 @@ import fnmatch
 import re
 
 from .. import collection
-from .base import ActionBase
+from .base import ActionBase, MultiActionBase
 
 
-class FindPathAction(ActionBase):
+class FindPathMixin:
+    def _handle_node(self, node):
+        status = False
+
+        pattern = self.options.pattern
+        path = node.prettypath
+
+        matched = False
+        if pattern[0:2] == "r:":
+            matched = re.search(pattern[2:], path)
+        else:
+            if self.options.nocase:
+                pattern = pattern.lower()
+                path = path.lower()
+
+            if fnmatch.fnmatch(path, pattern):
+                matched = True
+
+        if matched:
+            status = True
+            self.writer.stdout.status(node.prettypath, "FINDPATH")
+
+        if isinstance(node, collection.Directory):
+            for child in sorted(node.children):
+                if self._handle_node(node.children[child]):
+                    status = True
+
+        return status
+
+
+class FindPathAction(ActionBase, FindPathMixin):
     """ Find paths that match specific tags. """
 
     ACTION_NAME = "findpath"
@@ -47,33 +77,37 @@ class FindPathAction(ActionBase):
 
         return self._handle_node(node)
 
-    def _handle_node(self, node):
+
+class MultiFindPathAction(MultiActionBase, FindPathMixin):
+    """ Find paths that match specific tags. """
+
+    ACTION_NAME = "multifindpath"
+    ACTION_DESC = "Find paths that match specific pattern."
+
+    @classmethod
+    def add_arguments(cls, parser):
+        super(MultiFindPathAction, cls).add_arguments(parser)
+
+        parser.add_argument(
+            "-c", "--no-case", dest="nocase", default=False, action="store_true",
+            help="Perform case insensitive match for path names."
+        )
+        parser.add_argument(
+            "pattern",
+            help="path pattern to find."
+        )
+
+    def run_multi(self):
         status = False
 
-        pattern = self.options.pattern
-        path = node.prettypath
-
-        matched = False
-        if pattern[0:2] == "r:":
-            matched = re.search(pattern[2:], path)
-        else:
-            if self.options.nocase:
-                pattern = pattern.lower()
-                path = path.lower()
-
-            if fnmatch.fnmatch(path, pattern):
-                matched = True
-
-        if matched:
-            status = True
-            self.writer.stdout.status(node.prettypath, "FINDPATH")
-
-        if isinstance(node, collection.Directory):
-            for child in sorted(node.children):
-                if self._handle_node(node.children[child]):
-                    status = True
+        for relpath in sorted(self._collections):
+            self.writer.stdout.status(relpath, "COLLECTION")
+            coll = self._collections[relpath]
+            node = coll.rootnode
+            if self._handle_node(node):
+                status = True
 
         return status
 
 
-ACTIONS = [FindPathAction]
+ACTIONS = [FindPathAction, MultiFindPathAction]

@@ -10,10 +10,39 @@ __all__ = ["ACTIONS"]
 
 
 from .. import collection
-from .base import ActionBase
+from .base import ActionBase, MultiActionBase
 
 
-class FindTagAction(ActionBase):
+class FindTagMixin:
+    def _handle_node(self, node):
+        status = False
+
+        alltags = set(
+            meta.get("tag", "").lower()
+            for meta in node.meta.get("tag")
+        )
+        findtags = set(tag.lower() for tag in self.options.tags)
+
+        found = findtags.intersection(alltags)
+
+        if self.options.match_all:
+            matched = (found == findtags)
+        else:
+            matched = len(found) > 0
+
+        if matched:
+            status = True
+            self.writer.stdout.status(node.prettypath, "FINDTAG", ",".join(sorted(found)))
+
+        if isinstance(node, collection.Directory):
+            for child in sorted(node.children):
+                if self._handle_node(node.children[child]):
+                    status = True
+
+        return status
+
+
+class FindTagAction(ActionBase, FindTagMixin):
     """ Find paths that match specific tags. """
 
     ACTION_NAME = "findtag"
@@ -48,32 +77,41 @@ class FindTagAction(ActionBase):
 
         return self._handle_node(node)
 
-    def _handle_node(self, node):
+
+class MultiFindTagAction(MultiActionBase, FindTagMixin):
+    """ Find paths that match specific tags. """
+
+    ACTION_NAME = "multifindtag"
+    ACTION_DESC = "Find paths that match specific tags."
+
+    @classmethod
+    def add_arguments(cls, parser):
+        super(MultiFindTagAction, cls).add_arguments(parser)
+
+        parser.add_argument(
+            "-a", "--all",
+            dest="match_all",
+            default=False,
+            action="store_true",
+            help="Report paths only if the path has all tags specified."
+        )
+        parser.add_argument(
+            "tags",
+            nargs="+",
+            help="List of tags to find."
+        )
+
+    def run_multi(self):
         status = False
 
-        alltags = set(
-            meta.get("tag", "").lower()
-            for meta in node.meta.get("tag")
-        )
-        findtags = set(tag.lower() for tag in self.options.tags)
-
-        found = findtags.intersection(alltags)
-
-        if self.options.match_all:
-            matched = (found == findtags)
-        else:
-            matched = len(found) > 0
-
-        if matched:
-            status = True
-            self.writer.stdout.status(node.prettypath, "FINDTAG", ",".join(sorted(found)))
-
-        if isinstance(node, collection.Directory):
-            for child in sorted(node.children):
-                if self._handle_node(node.children[child]):
-                    status = True
+        for relpath in sorted(self._collections):
+            self.writer.stdout.status(relpath, "COLLECTION")
+            coll = self._collections[relpath]
+            node = coll.rootnode
+            if self._handle_node(node):
+                status = True
 
         return status
 
 
-ACTIONS = [FindTagAction]
+ACTIONS = [FindTagAction, MultiFindTagAction]

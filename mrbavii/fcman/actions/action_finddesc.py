@@ -10,10 +10,44 @@ __all__ = ["ACTIONS"]
 
 
 from .. import collection
-from .base import ActionBase
+from .base import ActionBase, MultiActionBase
 
 
-class FindDescAction(ActionBase):
+class FindDescMixin:
+    """ Mixin for FindDesc/MultiFindDesc """
+
+    def _handle_node(self, node):
+        status = False
+
+        alldescs = " ".join(
+            meta.get("description", "").lower()
+            for meta in node.meta.get("description")
+        )
+        finddescs = set(i.lower() for i in self.options.descs)
+        found = set()
+
+        for desc in finddescs:
+            if desc in alldescs:
+                found.add(desc)
+
+        if self.options.match_all:
+            matched = (found == finddescs)
+        else:
+            matched = len(found) > 0
+
+        if matched:
+            status = True
+            self.writer.stdout.status(node.prettypath, "FINDDESC", ",".join(sorted(found)))
+
+        if isinstance(node, collection.Directory):
+            for child in sorted(node.children):
+                if self._handle_node(node.children[child]):
+                    status = True
+
+        return status
+
+
+class FindDescAction(ActionBase, FindDescMixin):
     """ Find paths that match specific descriptions. """
 
     ACTION_NAME = "finddesc"
@@ -48,35 +82,41 @@ class FindDescAction(ActionBase):
 
         return self._handle_node(node)
 
-    def _handle_node(self, node):
+
+class MultiFindDescAction(MultiActionBase, FindDescMixin):
+    """ Find paths that match specific descriptions. """
+
+    ACTION_NAME = "multifinddesc"
+    ACTION_DESC = "Find paths that match specific descriptions."
+
+    @classmethod
+    def add_arguments(cls, parser):
+        super(MultiFindDescAction, cls).add_arguments(parser)
+
+        parser.add_argument(
+            "-a", "--all",
+            dest="match_all",
+            default=False,
+            action="store_true",
+            help="Report paths only if the path has all descriptions specified."
+        )
+        parser.add_argument(
+            "descs",
+            nargs="+",
+            help="List of descriptions to find."
+        )
+
+    def run_multi(self):
         status = False
 
-        alldescs = " ".join(
-            meta.get("description", "").lower()
-            for meta in node.meta.get("description")
-        )
-        finddescs = set(i.lower() for i in self.options.descs)
-        found = set()
-
-        for desc in finddescs:
-            if desc in alldescs:
-                found.add(desc)
-
-        if self.options.match_all:
-            matched = (found == finddescs)
-        else:
-            matched = len(found) > 0
-
-        if matched:
-            status = True
-            self.writer.stdout.status(node.prettypath, "FINDDESC", ",".join(sorted(found)))
-
-        if isinstance(node, collection.Directory):
-            for child in sorted(node.children):
-                if self._handle_node(node.children[child]):
-                    status = True
+        for relpath in sorted(self._collections):
+            self.writer.stdout.status(relpath, "COLLECTION")
+            coll = self._collections[relpath]
+            node = coll.rootnode
+            if self._handle_node(node):
+                status = True
 
         return status
 
 
-ACTIONS = [FindDescAction]
+ACTIONS = [FindDescAction, MultiFindDescAction]

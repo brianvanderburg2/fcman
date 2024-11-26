@@ -4,8 +4,11 @@ __author__ = "Brian Allen Vanderburg II"
 __copyright__ = "Copyright (C) 2013-2018 Brian Allen Vanderburg II"
 __license__ = "MIT License"
 
-__all__ = ["ActionBase"]
+__all__ = ["ActionBase", "MultiActionBase"]
 
+
+import glob
+import os
 
 from .. import collection
 
@@ -72,3 +75,51 @@ class ActionBase(object):
     def handle_sigint(self):
         """ Handle CTRL-C """
         pass
+
+
+class MultiActionBase(ActionBase):
+    """ A base action for multi-collection actions. """
+
+    ACTION_LOAD_COLLECTION = False
+
+    def __init__(self, program):
+        ActionBase.__init__(self, program)
+
+        self._collections = {}
+
+    @classmethod
+    def add_arguments(cls, parser):
+        ActionBase.add_arguments(parser)
+
+        parser.add_argument(
+            "-m", "--multi",
+            dest="multi",
+            action="extend",
+            nargs="+",
+            required=True,
+            help="List of collection files to load.  May contain glob.glob characters."
+        )
+
+    @classmethod
+    def parse_arguments(cls, options):
+        ActionBase.parse_arguments(options)
+
+    def load_collections(self):
+        """ Load the list of collections. """
+
+        all_collections = []
+        for pattern in self.options.multi:
+            all_collections.extend(glob.glob(pattern))
+
+            for filename in all_collections:
+            relpath = os.path.relpath(filename)
+            if self.verbose:
+                self.writer.stdout.status(filename, "LOADMULTI")
+            self._collections[relpath] = collection.Collection.load(filename)
+
+    def run(self):
+        self.load_collections()
+        self.run_multi()
+
+    def run_multi(self):
+        raise NotImplementedError
