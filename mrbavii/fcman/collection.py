@@ -436,9 +436,11 @@ class Collection(object):
     @classmethod
     def load(cls, filename):
         """ Function to load a file and return the collection object. """
+        from . import util
+
         coll = Collection()
 
-        tree = ET.parse(filename)
+        tree = ET.parse(util.open_xml_compressed(filename, "r"))
         root_xml_node = tree.getroot()
         if not root_xml_node.tag == 'collection':
             return None
@@ -453,6 +455,8 @@ class Collection(object):
 
     def save(self, filename):
         """ Save the collection to XML. """
+        from . import util
+
         root_xml_node = ET.Element('collection')
         if self.autoroot:
             root_xml_node.set("root", self.autoroot.replace(os.sep, "/"))
@@ -486,5 +490,5 @@ class Collection(object):
 
         # We don't need to use codecs here as ElementTree actually does the
         # encoding based on the enconding= parameter, unlike xml.dom.minidom
-        tree.write(filename, encoding='utf-8', xml_declaration=True,
-                   method='xml')
+        tree.write(util.open_xml_compressed(filename, "w"), encoding='utf-8',
+                   xml_declaration=True, method='xml')

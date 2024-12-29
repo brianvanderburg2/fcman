@@ -135,3 +135,24 @@ class StdStreamWriter(object):
         """ Initialize teh writer. """
         self.stdout = LogWriter(sys.stdout)
         self.stderr = LogWriter(sys.stderr)
+
+
+def open_xml_compressed(filename, mode):
+    """ Return the filename or open a compressed file object if needed. """
+    assert mode in ("r", "w"), "mode must be 'r' or 'w'"
+
+    fn = filename.lower()
+    _opener = None
+
+    if fn.endswith(".xml"):
+        return filename
+    elif fn.endswith(".gz"):
+        import gzip as _opener
+    elif fn.endswith(".bz2"):
+        import bz2 as _opener
+    elif fn.endswith(".xz"):
+        import lzma as _opener
+    else:
+        raise ValueError("Unsupported compression type for {}".format(filename))
+
+    return _opener.open(filename, "rb" if mode is "r" else "wb")
