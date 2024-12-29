@@ -111,12 +111,12 @@ class MultiActionBase(ActionBase):
         for pattern in self.options.multi:
             all_collections.extend(glob.glob(pattern))
 
-            for filename in all_collections:
-                relpath = os.path.relpath(filename)
+        for filename in all_collections:
+            relpath = os.path.relpath(filename)
 
-                if self.verbose:
-                    self.writer.stdout.status(filename, "LOADMULTI")
-                self._collections[relpath] = collection.Collection.load(filename)
+            if self.verbose:
+                self.writer.stdout.status(filename, "LOADMULTI")
+            self._collections[relpath] = collection.Collection.load(filename)
 
     def run(self):
         self.load_collections()
