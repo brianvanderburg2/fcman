@@ -27,7 +27,7 @@ class FindTagMixin:
 
         found = set()
         missed_one = False
-        for find_tag in self.options.tags:
+        for find_tag in self.options.pattern:
             find_tag_found = False
             for node_tag in alltags:
                 if fnmatch.fnmatch(node_tag, find_tag):
@@ -70,12 +70,12 @@ class FindTagAction(ActionBase, FindTagMixin):
             action="store_true",
             help="Report paths only if the path has all tags specified."
         )
-        parser.add_argument("path", help="Path to search")
         parser.add_argument(
-            "tags",
-            nargs="+",
+            "-p", "--pattern", action="extend", nargs="+", required=True,
             help="List of tags to find."
         )
+        parser.add_argument("path", nargs="?", default=".", help="Path to search")
+
 
     def run(self):
         node = self.find_node(
@@ -107,10 +107,10 @@ class MultiFindTagAction(MultiActionBase, FindTagMixin):
             help="Report paths only if the path has all tags specified."
         )
         parser.add_argument(
-            "tags",
-            nargs="+",
+            "-p", "--pattern", action="extend", nargs="+", required=True,
             help="List of tags to find."
         )
+
 
     def run_multi(self):
         status = False

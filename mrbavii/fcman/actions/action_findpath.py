@@ -60,11 +60,9 @@ class FindPathAction(ActionBase, FindPathMixin):
             "-c", "--no-case", dest="nocase", default=False, action="store_true",
             help="Perform case insensitive match for path names."
         )
-        parser.add_argument("path", help="Path to search")
-        parser.add_argument(
-            "pattern",
-            help="path pattern to find."
-        )
+        parser.add_argument("-p", "--pattern", required=True, help="path pattern to find.")
+        parser.add_argument("path", nargs="?", default=".", help="Path to search")
+
 
     def run(self):
         node = self.find_node(
@@ -92,10 +90,7 @@ class MultiFindPathAction(MultiActionBase, FindPathMixin):
             "-c", "--no-case", dest="nocase", default=False, action="store_true",
             help="Perform case insensitive match for path names."
         )
-        parser.add_argument(
-            "pattern",
-            help="path pattern to find."
-        )
+        parser.add_argument("-p", "--pattern", required=True, help="path pattern to find.")
 
     def run_multi(self):
         status = False

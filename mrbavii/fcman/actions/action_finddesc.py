@@ -23,7 +23,7 @@ class FindDescMixin:
             meta.get("description", "").lower()
             for meta in node.meta.get("description")
         )
-        finddescs = set(i.lower() for i in self.options.descs)
+        finddescs = set(i.lower() for i in self.options.pattern)
         found = set()
 
         for desc in finddescs:
@@ -64,12 +64,12 @@ class FindDescAction(ActionBase, FindDescMixin):
             action="store_true",
             help="Report paths only if the path has all descriptions specified."
         )
-        parser.add_argument("path", help="Path to search")
         parser.add_argument(
-            "descs",
-            nargs="+",
-            help="List of descriptions to find."
+            "-p", "--pattern", action="extend", nargs="+", required=True,
+            help="Pattern of descriptions to find."
         )
+        parser.add_argument("path", nargs="?", default=".", help="Path to search")
+
 
     def run(self):
         node = self.find_node(
@@ -101,9 +101,8 @@ class MultiFindDescAction(MultiActionBase, FindDescMixin):
             help="Report paths only if the path has all descriptions specified."
         )
         parser.add_argument(
-            "descs",
-            nargs="+",
-            help="List of descriptions to find."
+            "-p", "--pattern", action="extend", nargs="+", required=True,
+            help="Pattern of descriptions to find."
         )
 
     def run_multi(self):
