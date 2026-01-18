@@ -25,11 +25,16 @@ class ExportAction(ActionBase):
 
     def run(self):
         # Make directory if needed
-        if not os.path.isdir(self.program.collection.exportdir):
-            os.makedirs(self.program.collection.exportdir)
+        dirname = os.path.join(
+            self.program.dir,
+            self.program.EXPORTS_DIR
+        )
 
-        md5file = os.path.join(self.program.collection.exportdir, "md5sums.txt")
-        infofile = os.path.join(self.program.collection.exportdir, "info.txt")
+        if not os.path.isdir(dirname):
+            os.makedirs(dirname)
+
+        md5file = os.path.join(dirname, "md5sums.txt")
+        infofile = os.path.join(dirname, "info.txt")
 
         md5stream = util.TextFile(md5file)
         infostream = util.TextFile(infofile)

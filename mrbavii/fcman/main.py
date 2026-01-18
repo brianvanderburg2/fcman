@@ -17,6 +17,7 @@ __license__ = "MIT"
 
 import argparse
 import os
+import shutil
 import signal
 import sys
 
@@ -40,12 +41,20 @@ signal.signal(signal.SIGINT, sigint_print_and_exit)
 class Program(object):
     """ The main program object. """
 
+    COLLECTION_FILE = "collection.xml"
+    STAGING_FILE = "staging.xml"
+    SAVES_DIR = "saves"
+    BACKUP_DIR = "backups"
+    EXPORTS_DIR = "exports"
+    TAGS_DIR = "tags"
+
     def __init__(self):
         """ Initialize the program object. """
         self.collection = None
         self.iwd = None # The initial working directory before any chdir
         self.cwd = None
-        self.file = None # The actual file loaded (options.file is the file to search for)
+        self.dir = None # The collection directory (ie contains the collection xml files)
+        self.root = None # The root directory (ie contains the files)
         self.options = None
         self.verbose = None
         self.writer = None
@@ -57,13 +66,11 @@ class Program(object):
 
         # Base arguments
         parser.add_argument("-C", "--chdir", dest="chdir", default=None)
-        parser.add_argument("-f", "--file", dest="file", default="fcman.xml")
+        parser.add_argument("-d", "--dir", dest="dir", default=".fcman")
         parser.add_argument("-r", "--root", dest="root", default=None)
         parser.add_argument("-v", "--verbose", dest="verbose", default=False, action="store_true")
         parser.add_argument("-w", "--walk", dest="walk", default=False, action="store_true")
         parser.add_argument("-x", "--no-recurse", dest="recurse", default=True, action="store_false")
-        parser.add_argument("-b", "--backup", dest="backup", type=int, default=5, choices=range(0, 10))
-        parser.add_argument("-e", "--exportdir", dest="exportdir", default=None)
         parser.set_defaults(action=None)
 
         # Add commands
@@ -106,7 +113,7 @@ class Program(object):
         action.parse_arguments(options)
         if action.ACTION_LOAD_COLLECTION:
             # Load the collection if needed
-            if not self.load_file():
+            if not self.load_collection():
                 return -1
 
         def sigint_handler(*args):
@@ -123,108 +130,63 @@ class Program(object):
             signal.signal(signal.SIGINT, orig_handler)
 
         if self.collection and self.collection.dirty:
-            self.save_backup()
-            self.collection.save(self.file)
+            self.collection.save(
+                os.path.join(
+                    self.dir,
+                    self.STAGING_FILE
+                )
+            )
 
         return 0
 
-    def load_file(self):
-        """ Load the file. """
+    def load_collection(self):
+        """ Load the collection. """
         writer = self.writer
         verbose = self.verbose
 
-        self.file = self.find_file()
+        self.dir = self.find_dir()
 
-        if not self.file:
-            writer.stderr.status("Collection not found", "NOFILE")
+        if not self.dir:
+            writer.stderr.status("Collection not found", "NODIR")
             return False
         elif verbose:
-            writer.stdout.status(self.file, "COLLECTION")
+            writer.stdout.status(self.dir, "COLLECTION")
 
-        self.collection = collection.Collection.load(self.file)
+        self.collection = collection.Collection.load(
+            os.path.join(
+                self.dir,
+                self.STAGING_FILE
+            )
+        )
 
         # Set root
         if self.options.root:
             self.collection.set_root(self.options.root)
-        elif self.collection.autoroot:
-            self.collection.set_root(os.path.join(
-                os.path.dirname(self.file),
-                self.collection.autoroot
-            ))
         else:
-            self.collection.set_root(os.path.dirname(self.file))
+            self.collection.set_root(os.path.dirname(self.dir))
 
         if verbose:
             writer.stdout.status(self.collection.root, "ROOT")
 
-        # Set exportdir
-        if self.options.exportdir:
-            self.collection.set_exportdir(self.options.exportdir)
-        elif self.collection.autoexportdir:
-            self.collection.set_exportdir(os.path.join(
-                os.path.dirname(self.file),
-                self.collection.autoexportdir
-            ))
-        else:
-            self.collection.set_exportdir(os.path.dirname(self.file))
-
-        if verbose:
-            writer.stdout.status(self.collection.exportdir, "EXPORT")
-
         return True
 
-    def save_backup(self):
-        """ Save a backup based on the filename if requested. """
-        filename = self.file
-        backupname = os.path.join(
-            self.collection.exportdir,
-            os.path.basename(filename)
-        )
-        backup = self.options.backup
-        if backup == 0:
-            return
 
-        backup_concat = tuple(".{0}bak".format(i) for i in range(1, backup + 1))
-
-        if os.path.exists(filename):
-            # Make directory if it doesn't exist
-            if not os.path.isdir(self.collection.exportdir):
-                os.makedirs(self.collection.exportdir)
-
-            # Remove last backup if it exists
-            if os.path.exists(backupname + backup_concat[-1]):
-                os.remove(backupname + backup_concat[-1])
-
-            for i in range(len(backup_concat) - 2, -1, -1):
-                if os.path.exists(backupname + backup_concat[i]):
-                    os.rename(
-                        backupname + backup_concat[i],
-                        backupname + backup_concat[i + 1]
-                    )
-
-            os.rename(filename, backupname + backup_concat[0])
-
-
-    def find_file(self):
-        """ Use our options to find file. """
-
-        # Don't use os.path.isfile, it fails on device files from command
-        # substitution such as:
-        # mrbavii-fcman -f <(unxz history.xml.xz> findpath / "..."
+    def find_dir(self):
+        """ Use our options to find collection directory. """
 
         if not self.options.walk:
-            # In this mode, file directly specified
-            filename = os.path.normpath(self.options.file)
-            if os.path.exists(filename):
-                return filename
+            # In this mode, dir directly specified
+            dirname = os.path.normpath(self.options.dir)
+            if os.path.isdir(dirname):
+                return dirname
             return None
 
-        # In walk mode, walk up the directory to find the file
+        # In walk mode, walk up the directory to find the collection dir
         head = self.cwd
         while head:
-            filename = os.path.join(head, self.options.file)
-            if os.path.exists(filename):
-                return os.path.relpath(filename) # relpath to keep it pretty
+            dirname = os.path.join(head, self.options.dir)
+            if os.path.isdir(dirname):
+                return os.path.relpath(dirname) # relpath to keep it pretty
 
             (head, tail) = os.path.split(head)
             if not tail:

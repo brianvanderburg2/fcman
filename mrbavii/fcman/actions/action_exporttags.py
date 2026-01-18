@@ -25,13 +25,14 @@ class ExportTagsAction(ActionBase):
 
     def run(self):
         # Make directory if needed
-        if not os.path.isdir(self.program.collection.exportdir):
-            os.makedirs(self.program.collection.exportdir)
+        self._tagsdir = os.path.join(
+            self.program.dir,
+            self.program.TAGS_DIR
+        )
 
-        # Clear tags directory if needed
-        self._tagsdir = os.path.join(self.program.collection.exportdir, "tags")
         if os.path.isdir(self._tagsdir):
             shutil.rmtree(self._tagsdir)
+
         os.makedirs(self._tagsdir)
 
         self._handle_node(self.program.collection.rootnode)
