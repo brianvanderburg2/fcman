@@ -11,6 +11,7 @@ __all__ = [
 
 
 import io
+import re
 import sys
 
 from . import collection
@@ -22,13 +23,7 @@ TIMEDIFF = 2
 
 def splitval(val):
     """ Split a string into a list of non-empty values by comma or whitespace. """
-    # Convert whitespace to comma
-    tmpval = ''.join(
-        "," if ch in " \t\n\r" else ch for ch in val
-    )
-    return list(
-        word for word in tmpval.split(",") if len(word)
-    )
+    return list(re.findall(r"[^,\s\n\r\t]+", val))
 
 
 class StreamWriter(object):
