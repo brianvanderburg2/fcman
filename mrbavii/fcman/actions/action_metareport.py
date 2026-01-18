@@ -50,6 +50,7 @@ class MetaReportAction(ActionBase):
 
     ACTION_NAME = "metareport"
     ACTION_DESC = "Report information about metadata"""
+    ACTION_ALLOW_COMMITTED =  True
 
     @classmethod
     def add_arguments(cls, parser):

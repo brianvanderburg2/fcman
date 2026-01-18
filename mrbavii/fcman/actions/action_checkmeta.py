@@ -18,6 +18,7 @@ class CheckMetaAction(ActionBase):
 
     ACTION_NAME = "checkmeta"
     ACTION_DESC = "Check metadata, dependencies, etc"
+    ACTION_ALLOW_COMMITTED =  True
 
     def run(self):
         status = True

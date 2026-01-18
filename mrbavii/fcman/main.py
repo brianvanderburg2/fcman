@@ -41,8 +41,8 @@ signal.signal(signal.SIGINT, sigint_print_and_exit)
 class Program(object):
     """ The main program object. """
 
-    COLLECTION_FILE = "collection.xml"
-    STAGING_FILE = "staging.xml"
+    COMMITTED_FILE = "collection.xml"
+    STAGED_FILE = "staging.xml"
     SAVES_DIR = "saves"
     BACKUP_DIR = "backups"
     EXPORTS_DIR = "exports"
@@ -70,6 +70,7 @@ class Program(object):
         parser.add_argument("-r", "--root", dest="root", default=None)
         parser.add_argument("-v", "--verbose", dest="verbose", default=False, action="store_true")
         parser.add_argument("-w", "--walk", dest="walk", default=False, action="store_true")
+        parser.add_argument("-c", "--committed", dest="committed", default=False, action="store_true")
         parser.add_argument("-x", "--no-recurse", dest="recurse", default=True, action="store_false")
         parser.set_defaults(action=None)
 
@@ -116,6 +117,10 @@ class Program(object):
             if not self.load_collection():
                 return -1
 
+        if options.committed and not action.ACTION_ALLOW_COMMITTED:
+            writer.stderr.status("Action not allowed", "NOTALLOWED")
+            return -1;
+
         def sigint_handler(*args):
             # if acton handles the signal, don't abort
             if action_obj.handle_sigint() != True:
@@ -130,12 +135,16 @@ class Program(object):
             signal.signal(signal.SIGINT, orig_handler)
 
         if self.collection and self.collection.dirty:
-            self.collection.save(
-                os.path.join(
-                    self.dir,
-                    self.STAGING_FILE
+            if not options.committed: # don't save to staged file if we loaded the committed file
+                self.collection.save(
+                    os.path.join(
+                        self.dir,
+                        self.STAGED_FILE
+                    )
                 )
-            )
+            else:
+                writer.stderr.status("Save not allowed", "NOSAVE")
+                return -1
 
         return 0
 
@@ -155,7 +164,7 @@ class Program(object):
         self.collection = collection.Collection.load(
             os.path.join(
                 self.dir,
-                self.STAGING_FILE
+                self.STAGED_FILE if self.options.committed == False else self.COMMITTED_FILE
             )
         )
 

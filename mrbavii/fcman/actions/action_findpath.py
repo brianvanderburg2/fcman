@@ -51,6 +51,7 @@ class FindPathAction(ActionBase, FindPathMixin):
 
     ACTION_NAME = "findpath"
     ACTION_DESC = "Find paths that match specific pattern."
+    ACTION_ALLOW_COMMITTED =  True
 
     @classmethod
     def add_arguments(cls, parser):

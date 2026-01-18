@@ -58,6 +58,7 @@ class FindTagAction(ActionBase, FindTagMixin):
 
     ACTION_NAME = "findtag"
     ACTION_DESC = "Find paths that match specific tags."
+    ACTION_ALLOW_COMMITTED =  True
 
     @classmethod
     def add_arguments(cls, parser):

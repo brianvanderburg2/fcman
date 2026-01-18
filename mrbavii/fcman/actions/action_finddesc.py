@@ -52,6 +52,7 @@ class FindDescAction(ActionBase, FindDescMixin):
 
     ACTION_NAME = "finddesc"
     ACTION_DESC = "Find paths that match specific descriptions."
+    ACTION_ALLOW_COMMITTED =  True
 
     @classmethod
     def add_arguments(cls, parser):

@@ -22,6 +22,7 @@ class CheckAction(ActionBase):
 
     ACTION_NAME = "check"
     ACTION_DESC = "Perform quick collection check"
+    ACTION_ALLOW_COMMITTED = True
 
     def __init__(self, *args, **kwargs):
         ActionBase.__init__(self, *args, **kwargs)

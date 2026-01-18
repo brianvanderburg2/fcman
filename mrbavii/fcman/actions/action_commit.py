@@ -27,12 +27,12 @@ class CommitAction(ActionBase):
         # Backup current collection.xml file
         staging = os.path.join(
             self.program.dir,
-            self.program.STAGING_FILE
+            self.program.STAGED_FILE
         )
 
         collection = os.path.join(
             self.program.dir,
-            self.program.COLLECTION_FILE)
+            self.program.COMMITTED_FILE)
 
         backups = os.path.join(
             self.program.dir,
