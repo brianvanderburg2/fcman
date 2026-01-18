@@ -2,7 +2,7 @@
 # pylint: disable=too-few-public-methods,redefined-builtin
 
 __author__ = "Brian Allen Vanderburg II"
-__copyright__ = "Copyright 2000-2019"
+__copyright__ = "Copyright 2000-2026"
 __license__ = "MIT"
 
 __all__ = [
@@ -11,6 +11,7 @@ __all__ = [
 ]
 
 
+import contextlib
 import io
 import re
 import signal
@@ -164,15 +165,34 @@ def open_xml_compressed(filename, mode):
     fn = filename.lower()
     _opener = None
 
-    if fn.endswith(".xml"):
-        return filename
-    elif fn.endswith(".gz"):
+
+    if fn.endswith(".gz"):
         import gzip as _opener
     elif fn.endswith(".bz2"):
         import bz2 as _opener
     elif fn.endswith(".xz"):
         import lzma as _opener
     else:
-        raise ValueError("Unsupported compression type for {}".format(filename))
+        _opener = io # call io.open
 
-    return _opener.open(filename, "rb" if mode is "r" else "wb")
+    return _opener.open(filename, "rb" if mode == "r" else "wb")
+
+def files_match(a, b):
+    """ Compare two files to see if they match """
+
+    with (
+        contextlib.closing(open_xml_compressed(a, "r")) as ha,
+        contextlib.closing(open_xml_compressed(b, "r")) as hb
+    ):
+        while True:
+            ba = ha.read(1024000)
+            bb = hb.read(1024000)
+
+            if ba != bb:
+                return False
+
+            if len(ba) == 0 or len(bb) == 0:
+                break
+
+    # If reads ever didn't match it would return false above
+    return True
