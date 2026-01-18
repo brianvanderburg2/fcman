@@ -3,7 +3,7 @@
 """ File collection management utility. """
 
 __author__ = "Brian Allen Vanderburg II"
-__copyright__ = "Copyright 2000-2019"
+__copyright__ = "Copyright 2000-2026"
 __license__ = "MIT"
 
 # stderr should be for when a program error occurs
@@ -26,11 +26,11 @@ from . import collection
 
 
 # Only run on Python 3
-if sys.version_info[0:2] < (3, 2):
-    sys.exit("This program requires Python 3.2 or greater")
+if sys.version_info[0:2] < (3, 9):
+    sys.exit("This program requires Python 3.9 or greater")
 
 
-# modify the default keyboard interrup exception
+# modify the default keyboard interrupt exception
 def sigint_print_and_exit(*args):
     sys.stderr.write("Aborted by Interrupt\n")
     sys.exit(-1)
