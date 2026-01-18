@@ -433,7 +433,7 @@ class Collection(object):
 
         coll = Collection()
 
-        tree = ET.parse(util.open_xml_compressed(filename, "r"))
+        tree = ET.parse(util.open_compressed(filename, "r"))
         root_xml_node = tree.getroot()
         if not root_xml_node.tag == 'collection':
             return None
@@ -471,5 +471,5 @@ class Collection(object):
 
         # We don't need to use codecs here as ElementTree actually does the
         # encoding based on the enconding= parameter, unlike xml.dom.minidom
-        tree.write(util.open_xml_compressed(filename, "w"), encoding='utf-8',
+        tree.write(util.open_compressed(filename, "w"), encoding='utf-8',
                    xml_declaration=True, method='xml')

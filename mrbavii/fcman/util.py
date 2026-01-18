@@ -158,8 +158,8 @@ class VerboseChecker(object):
     __nonzero__ = __bool__
 
 
-def open_xml_compressed(filename, mode):
-    """ Return the filename or open a compressed file object if needed. """
+def open_compressed(filename, mode):
+    """ Return a file object fo reading/writting based onextension."""
     assert mode in ("r", "w"), "mode must be 'r' or 'w'"
 
     fn = filename.lower()
@@ -181,8 +181,8 @@ def files_match(a, b):
     """ Compare two files to see if they match """
 
     with (
-        contextlib.closing(open_xml_compressed(a, "r")) as ha,
-        contextlib.closing(open_xml_compressed(b, "r")) as hb
+        contextlib.closing(open_compressed(a, "r")) as ha,
+        contextlib.closing(open_compressed(b, "r")) as hb
     ):
         while True:
             ba = ha.read(1024000)
