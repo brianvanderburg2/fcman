@@ -37,30 +37,6 @@ def sigint_print_and_exit(*args):
 signal.signal(signal.SIGINT, sigint_print_and_exit)
 
 
-class VerboseChecker(object):
-    """ A small class whose boolean value depends on verbose or a signal. """
-
-    def __init__(self, verbose):
-        self._verbose = verbose
-        self._signalled = False
-
-        try:
-            signal.signal(signal.SIGUSR1, self._signal)
-        except ImportError:
-            pass
-
-    def _signal(self, sig, stack):
-        # pylint: disable=unused-argument
-        self._signalled = True
-
-    def __bool__(self):
-        result = self._verbose or self._signalled
-        self._signalled = False
-        return result
-
-    __nonzero__ = __bool__
-
-
 class Program(object):
     """ The main program object. """
 
@@ -108,7 +84,7 @@ class Program(object):
         self.options = options = parser.parse_args()
 
         # Handle some objects
-        self.verbose = verbose = VerboseChecker(options.verbose)
+        self.verbose = verbose = util.VerboseChecker(options.verbose)
         self.writer = writer = util.StdStreamWriter()
 
         # Handle current directory

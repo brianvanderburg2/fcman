@@ -6,12 +6,14 @@ __copyright__ = "Copyright 2000-2019"
 __license__ = "MIT"
 
 __all__ = [
-    "TIMEDIFF", "splitval", "StreamWriter", "LogWriter", "TextFile", "StdStreamWriter"
+    "TIMEDIFF", "splitval", "StreamWriter", "LogWriter", "TextFile", "StdStreamWriter",
+    "VerboseChecker", "open_xml_compressed"
 ]
 
 
 import io
 import re
+import signal
 import sys
 
 from . import collection
@@ -113,7 +115,6 @@ class LogWriter(StreamWriter):
         self.status(path, status, msg)
 
 
-
 class TextFile(StreamWriter):
     """ A text file based on StreamWriter. """
 
@@ -130,6 +131,30 @@ class StdStreamWriter(object):
         """ Initialize teh writer. """
         self.stdout = LogWriter(sys.stdout)
         self.stderr = LogWriter(sys.stderr)
+
+
+class VerboseChecker(object):
+    """ A small class whose boolean value depends on verbose or a signal. """
+
+    def __init__(self, verbose):
+        self._verbose = verbose
+        self._signalled = False
+
+        try:
+            signal.signal(signal.SIGUSR1, self._signal)
+        except ImportError:
+            pass
+
+    def _signal(self, sig, stack):
+        # pylint: disable=unused-argument
+        self._signalled = True
+
+    def __bool__(self):
+        result = self._verbose or self._signalled
+        self._signalled = False
+        return result
+
+    __nonzero__ = __bool__
 
 
 def open_xml_compressed(filename, mode):
