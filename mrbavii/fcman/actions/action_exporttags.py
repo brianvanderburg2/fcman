@@ -35,21 +35,28 @@ class ExportTagsAction(ActionBase):
 
         os.makedirs(self._tagsdir)
 
-        self._handle_node(self.program.collection.rootnode)
+        return self._handle_node(self.program.collection.rootnode)
 
     def _handle_node(self, node):
+        result = True
+
         if self.verbose:
             self.writer.stdout.status(node.prettypath, 'PROCESSING')
 
         if node.meta:
-            self._dumptags(node)
+            if not self._dumptags(node):
+                result = False
 
         if isinstance(node, collection.Directory):
             for child in sorted(node.children):
-                self._handle_node(node.children[child])
+                if not self._handle_node(node.children[child]):
+                    result = False
+
+        return result
 
     def _dumptags(self, node):
         """ Dump the tags to symlinks. """
+        result =  True
         tags = set()
 
         for meta in node.meta.get():
@@ -71,12 +78,18 @@ class ExportTagsAction(ActionBase):
 
             relpath = os.path.relpath(node.path, tagdir)
             basename = os.path.basename(node.path)
-            # TODO: if basename exists, ie linked from multiple areas
-            # maybe increment a suffix on it
-            os.symlink(
-                relpath,
-                os.path.join(tagdir, basename)
-            )
+            link = os.path.join(tagdir, basename)
+
+            if os.path.exists(link):
+                self.writer.stdout.status(node.prettypath, 'DUPLICATE', tag)
+                result = False
+            else:
+                os.symlink(
+                    relpath,
+                    link
+                )
+
+        return result
 
 
 ACTIONS = [ExportTagsAction]
