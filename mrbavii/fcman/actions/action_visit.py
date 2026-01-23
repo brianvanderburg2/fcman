@@ -57,6 +57,7 @@ class VisitAction(ActionBase):
 
     ACTION_NAME = "visit"
     ACTION_DESC = "Visit each node executing a script or function"
+    ACTION_ALLOW_COMMITTED = True
 
     @classmethod
     def add_arguments(cls, parser):
