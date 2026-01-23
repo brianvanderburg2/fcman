@@ -29,25 +29,25 @@ class _Wrapper:
         else:
             self._instance = None
 
-    def initialize(self, args, program, data):
+    def initialize(self, args, program):
         if self._instance:
             instance_initialize = getattr(self._instance, "initialize", None)
             if callable(instance_initialize):
-                return instance_initialize(args, program, data)
+                return instance_initialize(args, program)
         
         return  True
 
-    def visit(self, node, args, program, data):
+    def visit(self, node, args, program):
         if self._instance:
-            return self._instance.visit(node, args, program, data)
+            return self._instance.visit(node, args, program)
         else:
-            return self._func(node, args, program, data)
+            return self._func(node, args, program)
 
-    def finalize(self, args, program, data):
+    def finalize(self, args, program):
         if self._instance:
             instance_finalize = getattr(self._instance, "finalize", None)
             if callable(instance_finalize):
-                return instance_finalize(args, program, data)
+                return instance_finalize(args, program)
 
         return True
 
@@ -75,19 +75,18 @@ class VisitAction(ActionBase):
     def __init__(self, program):
         super(VisitAction, self).__init__(program)
         self._visitor = None
-        self._data = {}
 
     def run(self):
         if not self._load_code():
             return False
 
-        if not self._visitor.initialize(self.options.args, self.program, self._data):
+        if not self._visitor.initialize(self.options.args, self.program):
             return False
 
         if not self.handle_node(self.program.collection.rootnode):
             return False
 
-        return self._visitor.finalize(self.options.args, self.program, self._data)
+        return self._visitor.finalize(self.options.args, self.program)
 
     def _load_code(self):
         filename = self.options.code
@@ -125,7 +124,7 @@ class VisitAction(ActionBase):
         if self.verbose:
             self.writer.stdout.status(node.prettypath, 'PROCESSING')
 
-        if not self._visitor.visit(node, list(self.options.args), self.program, self._data):
+        if not self._visitor.visit(node, list(self.options.args), self.program):
             result = False
 
         if isinstance(node, collection.Directory):
