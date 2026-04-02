@@ -106,4 +106,4 @@ class MultiFindPathAction(MultiActionBase, FindPathMixin):
         return status
 
 
-ACTIONS = [FindPathAction, MultiFindPathAction]
+#ACTIONS = [FindPathAction, MultiFindPathAction]

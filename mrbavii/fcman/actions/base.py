@@ -18,8 +18,7 @@ class ActionBase(object):
 
     ACTION_NAME = None
     ACTION_DESC = ""
-    ACTION_LOAD_COLLECTION = True
-    ACTION_ALLOW_COMMITTED = False
+    ACTION_LOAD_STATE = True
 
     def __init__(self, program):
         self.program = program
@@ -38,20 +37,20 @@ class ActionBase(object):
     def parse_arguments(cls, options):
         pass
 
-    def normalize_path(self, path):
+    def normalize_path(self, coll, path):
         """ Normalize a path. """
-        result = self.program.collection.normalize(path)
+        result = coll.normalize(path)
         if result is None:
             self.writer.stderr.status(path, "BADPATH")
 
         return result
 
-    def find_nearest_node(self, path):
+    def find_nearest_node(self, coll, path):
         """ Find the node or the nearest parent node.
             Return is (node, remaining_path) """
 
         path = list(path)
-        node = self.program.collection.rootnode
+        node = coll.rootnode
 
         while len(path):
             if not isinstance(node, collection.Directory):
@@ -68,9 +67,9 @@ class ActionBase(object):
         # len(path) == 0 means we found the node, else just the nearest parent
         return (node, path)
 
-    def find_node(self, path):
+    def find_node(self, coll, path):
         """ Find the exact node or return None. """
-        (node, remaining_path) = self.find_nearest_node(path)
+        (node, remaining_path) = self.find_nearest_node(coll, path)
         return node if not remaining_path else None
 
     def handle_sigint(self):
@@ -80,8 +79,6 @@ class ActionBase(object):
 
 class MultiActionBase(ActionBase):
     """ A base action for multi-collection actions. """
-
-    ACTION_LOAD_COLLECTION = False
 
     def __init__(self, program):
         ActionBase.__init__(self, program)

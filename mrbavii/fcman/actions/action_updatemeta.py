@@ -14,6 +14,7 @@ import fnmatch
 import re
 
 from .. import collection
+from .. import consts
 from .. import util
 from .base import ActionBase
 
@@ -131,21 +132,33 @@ class UpdateMetaAction(ActionBase):
         ActionBase.__init__(self, *args, **kwargs)
         self._allmeta = []
 
+
+    @classmethod
+    def add_arguments(cls, parser):
+        super(UpdateMetaAction, cls).add_arguments(parser)
+        parser.add_argument(
+            "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
+            action="store", help="Collection name"
+        )
+
     def run(self):
-        if not self.loadmeta(self.program.collection.rootnode):
+        coll = self.program.load_collection(self.options.name)
+        if coll is None:
             return False
 
-        self.resetmeta(self.program.collection.rootnode)
+        if not self.loadmeta(coll.rootnode):
+            return False
+
+        self.resetmeta(coll.rootnode)
         if not self.applymeta():
             return False
-
-        self.program.collection.dirty = True
 
         for meta in self._allmeta:
             if not meta.users:
                 self.writer.stdout.status(meta.node.prettypath, "UNUSEDMETA", meta.name)
 
-        return True
+        return self.program.save_collection(self.options.name, coll)
+
 
     def loadmeta(self, node):
         status = True
@@ -208,11 +221,12 @@ class UpdateMetaAction(ActionBase):
         """ Find the target the meta shold apply to. """
 
         parts = meta.target.strip().split("/")
+        coll = meta.node.collection
 
         # First find the starting node
         if not parts[0]:
             # First part empty, means started with "/"
-            node = self.program.collection.rootnode
+            node = coll.rootnode
             parts = parts[1:]
         else:
             node = meta.node.parent

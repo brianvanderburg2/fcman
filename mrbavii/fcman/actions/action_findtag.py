@@ -126,4 +126,4 @@ class MultiFindTagAction(MultiActionBase, FindTagMixin):
         return status
 
 
-ACTIONS = [FindTagAction, MultiFindTagAction]
+#ACTIONS = [FindTagAction, MultiFindTagAction]

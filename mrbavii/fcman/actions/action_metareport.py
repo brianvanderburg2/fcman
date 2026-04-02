@@ -12,37 +12,9 @@ __all__ = ["ACTIONS"]
 import os
 
 from .. import collection
+from .. import consts
 from .base import ActionBase
 from .action_checkmeta import CheckMetaAction as CMA
-
-class _DiagNode:
-    """ Helper node to keep track of ID value """
-    _counter = 0
-
-    @classmethod
-    def next_id(cls):
-        _DiagNode._counter += 1
-        return "N{0}".format(cls._counter)
-
-class _NodeDiagNode(_DiagNode):
-    def __init__(self, node, deps):
-        self.id = self.next_id()
-        self.node = node
-        self.deps_ids = list(deps)
-
-class _DepDiagNode(_DiagNode):
-    def __init__(self, name, minver, maxver):
-        self.name = name
-        self.minver = minver
-        self.maxver = maxver
-        self.id = self.next_id()
-        self.satisfy_ids = [] # ID of file diag nodes that satisfy this
-
-class _Info:
-    def __init__(self):
-        self.dep_diag_nodes = {} # (name, minver, maxver): node
-        self.node_diag_nodes = {} # collection node: node
-        self.provided_packages = {} # package name: [(collection node, version)]
 
 
 class MetaReportAction(ActionBase):
@@ -50,13 +22,15 @@ class MetaReportAction(ActionBase):
 
     ACTION_NAME = "metareport"
     ACTION_DESC = "Report information about metadata"""
-    ACTION_ALLOW_COMMITTED =  True
 
     @classmethod
     def add_arguments(cls, parser):
         """ Add the arguments. """
         super(MetaReportAction, cls).add_arguments(parser)
-
+        parser.add_argument(
+            "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
+            action="store", help="Collection name"
+        )
         parser.add_argument(
             "-a", "--all",
             dest="report_all",
@@ -75,16 +49,20 @@ class MetaReportAction(ActionBase):
     def run(self):
         """ Run the action """
 
+        coll = self.program.load_collection(self.options.name)
+        if coll is None:
+            return False
+
         self._packages = {}
         self._report_all = self.program.options.report_all
         self._report_type = self.program.options.report_type.upper()
         # format: {package: [(node, version),...]}
 
         # First scan the nodes for useful information
-        self._collect_meta(self.program.collection.rootnode)
+        self._collect_meta(coll.rootnode)
 
         # Now report the meta information
-        self._report_meta(self.program.collection.rootnode)
+        self._report_meta(coll.rootnode)
         
         # reportmeta simply reports the information, so missing dependencies
         # don't result in an error code like checkmeta does

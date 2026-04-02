@@ -9,6 +9,7 @@ __license__ = "MIT License"
 __all__ = ["ACTIONS"]
 
 
+from .. import consts
 from .base import ActionBase
 
 
@@ -22,27 +23,35 @@ class RenameAction(ActionBase):
     def add_arguments(cls, parser):
         """ Add our arguments. """
         super(RenameAction, cls).add_arguments(parser)
+        parser.add_argument(
+            "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
+            action="store", help="Collection name"
+        )
+        
         parser.add_argument("path", help="The path of the node to rename.")
-        parser.add_argument("name", help="The name to rename to.")
+        parser.add_argument("newname", help="The name to rename to.")
 
     def run(self):
-        nodepath = self.normalize_path(self.options.path)
+        coll = self.program.load_collection(self.options.name)
+        if coll is None:
+            return False
+
+        nodepath = self.normalize_path(coll, self.options.path)
         if nodepath is None:
             return False
 
-        node = self.find_node(nodepath)
+        node = self.find_node(coll, nodepath)
         if node is None:
             self.writer.stderr.status(nodepath, "NONODE")
             return False
 
-        if not node.rename(self.options.name):
+        if not node.rename(self.options.newname):
             self.writer.stderr.status(nodepath, "NORENAME")
             return False
         else:
             self.writer.stdout.status(nodepath, "RENAME", node)
 
-        self.program.collection.dirty = True
-        return True
+        return self.program.save_collection(self.options.name, coll)
 
 
 ACTIONS = [RenameAction]

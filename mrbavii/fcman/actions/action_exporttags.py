@@ -14,6 +14,7 @@ import re
 import shutil
 
 from .. import collection
+from .. import consts
 from .. import util
 from .base import ActionBase
 
@@ -23,11 +24,22 @@ class ExportTagsAction(ActionBase):
     ACTION_NAME = "exporttags"
     ACTION_DESC = "Export tags as symlinks/etc"
 
+    @classmethod
+    def add_arguments(cls, parser):
+        super(ExportTagsAction, cls).add_arguments(parser)
+        parser.add_argument(
+            "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
+            action="store", help="Collection name"
+        )
+
     def run(self):
+        coll = self.program.load_collection(self.options.name)
+
         # Make directory if needed
         self._tagsdir = os.path.join(
-            self.program.dir,
-            self.program.TAGS_DIR
+            self.program.statedir,
+            self.options.name,
+            consts.TAG_DIR
         )
 
         if os.path.isdir(self._tagsdir):
@@ -35,7 +47,7 @@ class ExportTagsAction(ActionBase):
 
         os.makedirs(self._tagsdir)
 
-        return self._handle_node(self.program.collection.rootnode)
+        return self._handle_node(coll.rootnode)
 
     def _handle_node(self, node):
         result = True

@@ -196,3 +196,7 @@ def files_match(a, b):
 
     # If reads ever didn't match it would return false above
     return True
+
+def valid_collection_name(name):
+    """ Test that a collection name is valid. """
+    return re.match("^[a-zA-Z0-9_]+(-[a-zA-Z0-9_]+)*$", name) is not None

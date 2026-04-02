@@ -13,6 +13,7 @@ import os
 
 from .. import collection
 from .. import util
+from .. import consts
 from .base import ActionBase
 
 
@@ -29,16 +30,28 @@ class UpdateAction(ActionBase):
             "-f", "--force", dest="force", default=False,
             action="store_true", help="Always update the checksum."
         )
+        parser.add_argument(
+            "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
+            action="store", help="Collection name"
+        )
+        parser.add_argument(
+            "-R", "--no-recurse", dest="recurse", default=True,
+            action="store_false", help="Do not recurse"
+        )
         parser.add_argument("path", nargs="?", default=".", help="Path to " + cls.ACTION_NAME)
 
     def run(self):
-        path = self.normalize_path(self.options.path)
+        coll = self.program.load_collection(self.options.name)
+        if coll is None:
+            return False
+
+        path = self.normalize_path(coll, self.options.path)
         if path is None:
             return False
         elif self.verbose:
             self.writer.stdout.status(path, "WORKPATH")
 
-        node = self.find_node(path)
+        node = self.find_node(coll, path)
         if node is None:
             self.writer.stderr.status(path, "NONODE")
             return False
@@ -52,8 +65,7 @@ class UpdateAction(ActionBase):
         else:
             return False
 
-        self.program.collection.dirty = True
-        return True
+        return self.program.save_collection(self.options.name, coll)
 
     def handle_symlink(self, node):
         target = os.readlink(node.path)

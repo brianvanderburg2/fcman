@@ -20,10 +20,15 @@ import os
 import shutil
 import signal
 import sys
+import toml
+import traceback
 
-from . import util
 from . import actions
 from . import collection
+from . import config
+from . import consts
+from . import errors
+from . import util
 
 
 # Only run on Python 3
@@ -41,23 +46,18 @@ signal.signal(signal.SIGINT, sigint_print_and_exit)
 class Program(object):
     """ The main program object. """
 
-    COMMITTED_FILE = "collection.xml"
-    STAGED_FILE = "staging.xml"
-    SAVES_DIR = "saves"
-    BACKUP_DIR = "backups"
-    EXPORTS_DIR = "exports"
-    TAGS_DIR = "tags"
-
     def __init__(self):
         """ Initialize the program object. """
-        self.collection = None
-        self.iwd = None # The initial working directory before any chdir
-        self.cwd = None
-        self.dir = None # The collection directory (ie contains the collection xml files)
-        self.root = None # The root directory (ie contains the files)
+        self.collections = {}
+        self.config = None
+
+        self.iwd = None # initial working directory (before chdir)
+        self.cwd = None # current working direction (after chdir)
         self.options = None
         self.verbose = None
         self.writer = None
+        self.topdir = None
+        self.statedir = None
 
     @staticmethod
     def create_arg_parser():
@@ -66,12 +66,12 @@ class Program(object):
 
         # Base arguments
         parser.add_argument("-C", "--chdir", dest="chdir", default=None)
-        parser.add_argument("-d", "--dir", dest="dir", default=".fcman")
-        parser.add_argument("-r", "--root", dest="root", default=None)
         parser.add_argument("-v", "--verbose", dest="verbose", default=False, action="store_true")
-        parser.add_argument("-w", "--walk", dest="walk", default=False, action="store_true")
-        parser.add_argument("-c", "--committed", dest="committed", default=False, action="store_true")
-        parser.add_argument("-x", "--no-recurse", dest="recurse", default=True, action="store_false")
+
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument("-r", "--raw", dest="raw", default=False, action="store_true")
+        group.add_argument("-w", "--walk", dest="walk", default=False, action="store_true")
+
         parser.set_defaults(action=None)
 
         # Add commands
@@ -112,14 +112,10 @@ class Program(object):
             parser.exit()
 
         action.parse_arguments(options)
-        if action.ACTION_LOAD_COLLECTION:
-            # Load the collection if needed
-            if not self.load_collection():
-                return -1
 
-        if options.committed and not action.ACTION_ALLOW_COMMITTED:
-            writer.stderr.status("Action not allowed", "NOTALLOWED")
-            return -1;
+        if action.ACTION_LOAD_STATE:
+            if not self.load_state():
+                return -1
 
         def sigint_handler(*args):
             # if acton handles the signal, don't abort
@@ -134,67 +130,57 @@ class Program(object):
         finally:
             signal.signal(signal.SIGINT, orig_handler)
 
-        if self.collection and self.collection.dirty:
-            if not options.committed: # don't save to staged file if we loaded the committed file
-                self.collection.save(
-                    os.path.join(
-                        self.dir,
-                        self.STAGED_FILE
-                    )
-                )
-            else:
-                writer.stderr.status("Save not allowed", "NOSAVE")
-                return -1
-
         return 0
 
-    def load_collection(self):
-        """ Load the collection. """
+
+    #---------------------------------------------------------------------------
+    # State related code
+    #---------------------------------------------------------------------------
+
+    def load_state(self):
+        """ Load the config, state dir, etc """
         writer = self.writer
         verbose = self.verbose
 
-        self.dir = self.find_dir()
-
-        if not self.dir:
-            writer.stderr.status("Collection not found", "NODIR")
+        if not self.find_statedir():
+            writer.stderr.status(".", "STATENOTFOUND")
             return False
         elif verbose:
-            writer.stdout.status(self.dir, "COLLECTION")
+            writer.stdout.status(self.statedir, "STATEDIR")
 
-        self.collection = collection.Collection.load(
-            os.path.join(
-                self.dir,
-                self.STAGED_FILE if self.options.committed == False else self.COMMITTED_FILE
-            )
+        self.config = config.Config(
+            os.path.join(self.statedir, consts.MAIN_CONFIG_FILE)
         )
-
-        # Set root
-        if self.options.root:
-            self.collection.set_root(self.options.root)
-        else:
-            self.collection.set_root(os.path.dirname(self.dir))
-
-        if verbose:
-            writer.stdout.status(self.collection.root, "ROOT")
 
         return True
 
+    def find_statedir(self):
+        """ Find our state directory and update topdirectory as needed """
+        self.statedir = self._find_statedir()
+        if self.statedir is None:
+            self.topdir = None
+            return False
 
-    def find_dir(self):
-        """ Use our options to find collection directory. """
+        if self.options.raw:
+            self.topdir = self.statedir
+        else:
+            self.topdir = os.path.dirname(self.statedir)
 
+        return True
+
+    def _find_statedir(self):
+        """ Use our options to find state directory. """
         if not self.options.walk:
-            # In this mode, dir directly specified
-            dirname = os.path.normpath(self.options.dir)
-            if os.path.isdir(dirname):
-                return dirname
+            dirname = os.path.normpath(consts.STATEDIR_RAW if self.options.raw else consts.STATEDIR_NORMAL)
+            if os.path.isdir(dirname) and os.path.isfile(os.path.join(dirname, consts.MAIN_CONFIG_FILE)):
+                return os.path.relpath(dirname) # relpath to keep it pretty
             return None
 
         # In walk mode, walk up the directory to find the collection dir
         head = self.cwd
         while head:
-            dirname = os.path.join(head, self.options.dir)
-            if os.path.isdir(dirname):
+            dirname = os.path.join(head, consts.STATEDIR_NORMAL)
+            if os.path.isdir(dirname) and os.path.isfile(os.path.join(dirname, consts.MAIN_CONFIG_FILE)):
                 return os.path.relpath(dirname) # relpath to keep it pretty
 
             (head, tail) = os.path.split(head)
@@ -203,6 +189,81 @@ class Program(object):
 
         return None
 
+    #---------------------------------------------------------------------------
+    # Collection related code
+    #---------------------------------------------------------------------------
+
+    def load_collection(self, name):
+        """ Load the collection. """
+        writer = self.writer
+        verbose = self.verbose
+
+        if not util.valid_collection_name(name):
+            writer.stderr.status(name, "INVALID")
+            return None
+
+        subdir = os.path.join(self.statedir, name)
+        if not os.path.isdir(subdir):
+            writer.stderr.status(name, "NOTFOUND")
+            return None
+
+        # Load collection and config
+        coll = collection.Collection.load(
+            os.path.join(subdir, consts.COLLECTION_FILE)
+        )
+
+        cfg = config.Config(
+            os.path.join(subdir, consts.COLLECTION_CONFIG_FILE)
+        )
+
+        # Set config
+        coll.set_config(cfg)
+
+        # Set root
+        coll.set_root(
+            os.path.join(
+                self.topdir,
+                cfg.get_value("config.root", ".").replace("/", os.sep)
+            )
+        )
+
+        if verbose:
+            writer.stdout.status(name, "LOADED")
+            writer.stdout.status(coll.root, "ROOT")
+
+        return coll
+
+    def save_collection(self, name, coll):
+        """ Save the collection. """
+        writer = self.writer
+        verbose = self.verbose
+
+        if not util.valid_collection_name(name):
+            writer.stderr.status(name, "INVALID")
+            return False
+
+        subdir = os.path.join(self.statedir, name)
+        if not os.path.isdir(subdir):
+            writer.stderr.status(name, "NOTFOUND")
+            return False
+
+        coll.save(
+            os.path.join(subdir, consts.COLLECTION_FILE)
+        )
+
+        if verbose:
+            writer.stdout.status(name, "SAVED")
+
+        return True
+
 
 def main():
-    sys.exit(Program().main())
+    try:
+        result = Program().main()
+    except errors.Error as e:
+        sys.stderr.write(str(e))
+        sys.stderr.write("\n\n")
+        sys.stderr.flush()
+        result = -1
+
+    return result

@@ -13,6 +13,7 @@ import json
 import os
 
 from .. import collection
+from .. import consts
 from .. import util
 from .base import ActionBase
 
@@ -22,7 +23,6 @@ class CheckAction(ActionBase):
 
     ACTION_NAME = "check"
     ACTION_DESC = "Perform quick collection check"
-    ACTION_ALLOW_COMMITTED = True
 
     def __init__(self, *args, **kwargs):
         ActionBase.__init__(self, *args, **kwargs)
@@ -33,8 +33,27 @@ class CheckAction(ActionBase):
     @classmethod
     def add_arguments(cls, parser):
         super(CheckAction, cls).add_arguments(parser)
-        parser.add_argument("-s", "--state", dest="state", default=None, help="Path to state file")
-        parser.add_argument("--autosave-bytes", dest="autosave", default=1000000000, type=int, help="How many bytes before autosaving the state file")
+
+        parser.add_argument(
+            "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
+            action="store", help="Collection name"
+        )
+
+        parser.add_argument(
+            "-R", "--no-recurse", dest="recurse", default=True,
+            action="store_false", help="Do not recurse"
+        )
+
+        parser.add_argument(
+            "-s", "--state", dest="state", default=None,
+            help="Path to state file"
+        )
+
+        parser.add_argument(
+            "--autosave-bytes", dest="autosave", default=1000000000, type=int,
+            help="How many bytes before autosaving the state file"
+        )
+
         parser.add_argument("path", nargs="?", default=".", help="Path to " + cls.ACTION_NAME)
 
     @classmethod
@@ -48,15 +67,19 @@ class CheckAction(ActionBase):
             options.autosave = 100000000000
 
     def run(self):
+        coll = self.program.load_collection(self.options.name)
+        if coll is None:
+            return False
+
         self._load_state()
 
-        path = self.normalize_path(self.options.path)
+        path = self.normalize_path(coll, self.options.path)
         if path is None:
             return False
         elif self.verbose:
             self.writer.stdout.status(path, "WORKPATH")
 
-        node = self.find_node(path)
+        node = self.find_node(coll, path)
         if node is None:
             self.writer.stderr.status(path, "NONODE")
             return False

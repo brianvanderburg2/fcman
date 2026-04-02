@@ -10,6 +10,7 @@ __all__ = ["ACTIONS"]
 
 
 from .. import collection
+from .. import consts
 from .base import ActionBase, MultiActionBase
 
 
@@ -52,12 +53,15 @@ class FindDescAction(ActionBase, FindDescMixin):
 
     ACTION_NAME = "finddesc"
     ACTION_DESC = "Find paths that match specific descriptions."
-    ACTION_ALLOW_COMMITTED =  True
 
     @classmethod
     def add_arguments(cls, parser):
         super(FindDescAction, cls).add_arguments(parser)
 
+        parser.add_argument(
+            "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
+            action="store", help="Collection name"
+        )
         parser.add_argument(
             "-a", "--all",
             dest="match_all",
@@ -73,9 +77,11 @@ class FindDescAction(ActionBase, FindDescMixin):
 
 
     def run(self):
-        node = self.find_node(
-            self.program.collection.normalize(self.options.path)
-        )
+        coll = self.program.load_collection(self.options.name)
+        if coll is None:
+            return False
+
+        node = self.find_node(coll, coll.normalize(self.options.path))
 
         if node is None:
             self.writer.stderr.status(self.program.cwd, "BADPATH")
@@ -119,4 +125,4 @@ class MultiFindDescAction(MultiActionBase, FindDescMixin):
         return status
 
 
-ACTIONS = [FindDescAction, MultiFindDescAction]
+ACTIONS = [FindDescAction] #, MultiFindDescAction]

@@ -14,6 +14,7 @@ import re
 import shutil
 
 from .. import collection
+from .. import consts
 from .. import util
 from .base import ActionBase
 
@@ -23,11 +24,26 @@ class ExportAction(ActionBase):
     ACTION_NAME = "export"
     ACTION_DESC = "Export information"
 
+    @classmethod
+    def add_arguments(cls, parser):
+        super(ExportAction, cls).add_arguments(parser)
+        
+        parser.add_argument(
+            "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
+            action="store", help="Collection name"
+        )
+
+
     def run(self):
+        coll = self.program.load_collection(self.options.name)
+        if coll is None:
+            return False
+
         # Make directory if needed
         dirname = os.path.join(
-            self.program.dir,
-            self.program.EXPORTS_DIR
+            self.program.statedir,
+            self.options.name,
+            consts.EXPORT_DIR
         )
 
         if not os.path.isdir(dirname):
@@ -43,7 +59,7 @@ class ExportAction(ActionBase):
 
         with md5stream:
             with infostream:
-                self._handle_directory(self.program.collection.rootnode, streams)
+                self._handle_directory(coll.rootnode, streams)
 
     def _handle_directory(self, node, streams):
         if self.verbose:

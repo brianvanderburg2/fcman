@@ -9,6 +9,8 @@ __license__ = "MIT License"
 __all__ = ["ACTIONS"]
 
 
+from .. import consts
+
 from .base import ActionBase
 
 
@@ -22,14 +24,24 @@ class DeleteAction(ActionBase):
     def add_arguments(cls, parser):
         """ Add our arguments. """
         super(DeleteAction, cls).add_arguments(parser)
+
+        parser.add_argument(
+            "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
+            action="store", help="Collection name"
+        )
+               
         parser.add_argument("path", help="The path of the node to delete.")
 
     def run(self):
-        nodepath = self.normalize_path(self.options.path)
+        coll = self.program.load_collection(self.options.name)
+        if coll is None:
+            return False
+
+        nodepath = self.normalize_path(coll, self.options.path)
         if nodepath is None:
             return False
 
-        node = self.find_node(nodepath)
+        node = self.find_node(coll, nodepath)
         if node is None:
             self.writer.stderr.status(nodepath, "NONODE")
             return False
@@ -40,8 +52,7 @@ class DeleteAction(ActionBase):
         else:
             self.writer.stdout.status(nodepath, "DELETE")
 
-        self.program.collection.dirty = True
-        return True
+        return self.program.save_collection(self.options.name, coll)
 
 
 ACTIONS = [DeleteAction]

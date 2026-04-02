@@ -18,6 +18,9 @@ except ImportError:
     from xml.etree import ElementTree as ET
 
 
+from . import util
+
+
 class NodeMeta(object):
     """ Represent the metadata for a node. """
 
@@ -388,11 +391,15 @@ class Collection(object):
 
         self.root = None
         self.rootnode = RootDirectory(self)
-        self.dirty = False # This flag is set externally by actions to indicate to save
+        self.dirty = False # collection has been changed
+        self.config = None
 
     def set_root(self, root):
         """ Set the root the collection represents. """
         self.root = os.path.normpath(root) if root is not None else None
+
+    def set_config(self, config):
+        self.config = config
 
     def normalize(self, path):
         """ Normalize an external path to be relative to the collection root. """
@@ -429,8 +436,6 @@ class Collection(object):
     @classmethod
     def load(cls, filename):
         """ Function to load a file and return the collection object. """
-        from . import util
-
         coll = Collection()
 
         tree = ET.parse(util.open_compressed(filename, "r"))
@@ -445,8 +450,6 @@ class Collection(object):
 
     def save(self, filename):
         """ Save the collection to XML. """
-        from . import util
-
         root_xml_node = ET.Element('collection')
 
         self.rootnode.save(root_xml_node)

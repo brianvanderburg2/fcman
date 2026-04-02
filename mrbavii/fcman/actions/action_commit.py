@@ -14,6 +14,7 @@ import shutil
 import time
 
 from .. import collection
+from .. import consts
 from .. import util
 from .base import ActionBase
 
@@ -21,39 +22,48 @@ from .base import ActionBase
 class CommitAction(ActionBase):
     """ Dump information about the collection. """
     ACTION_NAME = "commit"
-    ACTION_DESC = "Commit staging.xml to collection.xml"
+    ACTION_DESC = "Commit collection"
+
+    @classmethod
+    def add_arguments(cls, parser):
+        """ Add arguments """
+        super(CommitAction, cls).add_arguments(parser)
+        parser.add_argument(
+            "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
+            action="store", help="Collection name"
+        )
 
     def run(self):
         # Backup current collection.xml file
-        staging = os.path.join(
-            self.program.dir,
-            self.program.STAGED_FILE
-        )
+        if not util.valid_collection_name(self.options.name):
+            self.writer.stderr.status(name, "BAD NAME")
+            return False
 
-        collection = os.path.join(
-            self.program.dir,
-            self.program.COMMITTED_FILE)
+        subdir = os.path.join(self.program.statedir, self.options.name)
+        if not os.path.isdir(subdir):
+            self.writer.stderr.status(name, "NO COLLECTION")
+            return False
 
-        backups = os.path.join(
-            self.program.dir,
-            self.program.BACKUP_DIR
-        )
+        staging = os.path.join(subdir, consts.STAGED_FILE)
+        committed = os.path.join(subdir, consts.COMMITTED_FILE)
 
-        backupname = time.strftime("%Y%m%d-%H%M%S.xml")
+        backupdir = os.path.join(subdir, consts.BACKUP_DIR)
+        backupname = time.strftime("committed-%Y%m%d-%H%M%S.xml")
+        backup = os.path.join(backupdir, backupname)
 
-        if os.path.exists(collection):
-            if util.files_match(staging, collection):
-                self.writer.stdout.status(self.program.dir, "NOCHG")
+        if os.path.exists(committed):
+            if util.files_match(staging, committed):
+                self.writer.stdout.status(self.options.name, "NOCHG")
                 return True
 
-            if not os.path.isdir(backups):
-                os.makedirs(backups)
+            if not os.path.isdir(backupdir):
+                os.makedirs(backupdir)
 
-            shutil.copyfile(collection, os.path.join(backups, backupname))
+            shutil.copyfile(committed, backup)
 
-        shutil.copyfile(staging, collection)
+        shutil.copyfile(staging, committed)
 
-        self.writer.stdout.status(self.program.dir, "COMMIT")
+        self.writer.stdout.status(self.options.name, "COMMIT")
         return True
 
 

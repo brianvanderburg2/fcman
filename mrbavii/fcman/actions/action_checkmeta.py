@@ -10,6 +10,7 @@ __all__ = ["ACTIONS"]
 
 
 from .. import collection
+from .. import consts
 from .base import ActionBase
 
 
@@ -18,24 +19,37 @@ class CheckMetaAction(ActionBase):
 
     ACTION_NAME = "checkmeta"
     ACTION_DESC = "Check metadata, dependencies, etc"
-    ACTION_ALLOW_COMMITTED =  True
+
+
+    @classmethod
+    def add_arguments(cls, parser):
+        super(CheckMetaAction, cls).add_arguments(parser)
+
+        parser.add_argument(
+            "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
+            action="store", help="Collection name"
+        )
 
     def run(self):
+        coll = self.program.load_collection(self.options.name)
+        if coll is None:
+            return False
+
         status = True
-        if not self._checkdeps():
+        if not self._checkdeps(coll):
             status = False
 
         return status
 
-    def _checkdeps(self):
+    def _checkdeps(self, coll):
         """ Check the dependencies. """
 
         # First gather all known packages that are actaully attached to a node
         packages = {}
-        self._checkdeps_walk_collect(self.program.collection.rootnode, packages)
+        self._checkdeps_walk_collect(coll.rootnode, packages)
 
         # Next check all dependencies from the nodes have a package to satisfy
-        return self._checkdeps_walk(self.program.collection.rootnode, packages)
+        return self._checkdeps_walk(coll.rootnode, packages)
 
     def _checkdeps_walk_collect(self, node, packages):
         for meta in node.meta.get("provides"):

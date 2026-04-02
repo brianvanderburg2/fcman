@@ -12,6 +12,7 @@ __all__ = ["ACTIONS"]
 import os
 
 from .. import collection
+from .. import consts
 from .action_update import UpdateAction
 
 
@@ -23,18 +24,24 @@ class AddAction(UpdateAction):
     @classmethod
     def add_arguments(cls, parser):
         super(AddAction, cls).add_arguments(parser)
-
+        
         parser.add_argument(
             "-p", "--parents", dest="parents", default=False,
             action="store_true", help="Create parent directory nodes if possible and needed"
         )
 
     def run(self):
-        path = self.normalize_path(self.options.path)
-        if path is None:
+        coll = self.program.load_collection(self.options.name)
+        if coll is None:
             return False
 
-        (node, remaining) = self.find_nearest_node(path)
+        path = self.normalize_path(coll, self.options.path)
+        if path is None:
+            return False
+        elif self.verbose:
+            self.writer.stdout.status(path, "WORKPATH")
+
+        (node, remaining) = self.find_nearest_node(coll, path)
         if len(remaining) == 0:
             self.writer.stderr.status(path, "EXISTS")
             return False
@@ -63,8 +70,7 @@ class AddAction(UpdateAction):
         else:
             return False
 
-        self.program.collection.dirty = True
-        return True
+        return self.program.save_collection(self.options.name, coll)
 
     def _handle_parents(self, node, parts):
         """ Create each directory part (only if the given directory actually exists). """
