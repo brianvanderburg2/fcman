@@ -1,4 +1,4 @@
-""" Commit action. """
+""" Backup action. """
 # pylint: disable=too-many-lines,missing-docstring,too-many-branches
 
 __author__ = "Brian Allen Vanderburg II"
@@ -19,15 +19,15 @@ from .. import util
 from .base import ActionBase
 
 
-class CommitAction(ActionBase):
-    """ Dump information about the collection. """
-    ACTION_NAME = "commit"
-    ACTION_DESC = "Commit collection"
+class BackupAction(ActionBase):
+    """ Backup a collection state. """
+    ACTION_NAME = "backup"
+    ACTION_DESC = "Backup a collection state"
 
     @classmethod
     def add_arguments(cls, parser):
         """ Add arguments """
-        super(CommitAction, cls).add_arguments(parser)
+        super(BackupAction, cls).add_arguments(parser)
         parser.add_argument(
             "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
             action="store", help="Collection name"
@@ -44,27 +44,23 @@ class CommitAction(ActionBase):
             self.writer.stderr.status(name, "NO COLLECTION")
             return False
 
-        staging = os.path.join(subdir, consts.STAGED_FILE)
-        committed = os.path.join(subdir, consts.COMMITTED_FILE)
+        filename = os.path.join(subdir, consts.COLLECTION_FILE)
+        if not os.path.exists(filename):
+            self.writer.stderr.status(name, "NO COLLECTION FILE")
+            return False
 
         backupdir = os.path.join(subdir, consts.BACKUP_DIR)
-        backupname = time.strftime("committed-%Y%m%d-%H%M%S.xml")
-        backup = os.path.join(backupdir, backupname)
+        backupbase = time.strftime("backup-%Y%m%d-%H%M%S.xml")        
+        backupname = os.path.join(backupdir, backupbase)
 
-        if os.path.exists(committed):
-            if util.files_match(staging, committed):
-                self.writer.stdout.status(self.options.name, "NOCHG")
-                return True
-
+        if os.path.exists(filename):
             if not os.path.isdir(backupdir):
                 os.makedirs(backupdir)
 
-            shutil.copyfile(committed, backup)
+            shutil.copyfile(filename, backupname)
 
-        shutil.copyfile(staging, committed)
-
-        self.writer.stdout.status(self.options.name, "COMMIT")
+        self.writer.stdout.status(self.options.name, "BACKUP")
         return True
 
 
-ACTIONS = [CommitAction]
+ACTIONS = [BackupAction]
