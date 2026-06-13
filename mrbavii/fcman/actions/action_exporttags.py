@@ -31,21 +31,34 @@ class ExportTagsAction(ActionBase):
             "-n", "--name", dest="name", default=consts.DEFAULT_COLLECTION,
             action="store", help="Collection name"
         )
+        parser.add_argument(
+            "-d", "--dir", dest="dir", default=None, action="store",
+            help="Tags directory"
+        )
 
     def run(self):
         coll = self.program.load_collection(self.options.name)
+        if coll is None:
+            return False
 
         # Make directory if needed
-        self._tagsdir = os.path.join(
-            self.program.statedir,
-            self.options.name,
-            consts.TAG_DIR
-        )
+        if self.options.dir is not None:
+            self._tagsdir = os.path.normpath(self.options.dir)
+        else:
+            self._tagsdir = os.path.join(
+                self.program.statedir,
+                self.options.name,
+                consts.TAG_DIR
+            )
 
-        if os.path.isdir(self._tagsdir):
-            shutil.rmtree(self._tagsdir)
+            # Only remove if using default internal directory under collection
+            # state. This allows tags from multiple collections to be exported
+            # to the same directory if specified
+            if not os.path.isdir(self._tagsdir):
+                os.makedirs(self._tagsdir)
 
-        os.makedirs(self._tagsdir)
+        if not os.path.isdir(self._tagsdir):
+            os.makedirs(self._tagsdir)
 
         return self._handle_node(coll.rootnode)
 
