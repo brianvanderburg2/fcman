@@ -193,6 +193,12 @@ class Program(object):
     # Collection related code
     #---------------------------------------------------------------------------
 
+    def determine_filename(self, filename, cfg):
+        """ Determine a filename with compression """
+        compression = cfg.get_value("config.compression", "")
+        ext = ("." + compression) if compression in ("xz", "gz") else ""
+        return filename + ext
+
     def load_collection(self, name):
         """ Load the collection. """
         writer = self.writer
@@ -208,15 +214,18 @@ class Program(object):
             return None
 
         # Load collection and config
-        coll = collection.Collection.load(
-            os.path.join(subdir, consts.COLLECTION_FILE)
-        )
-
         cfg = config.Config(
             os.path.join(subdir, consts.COLLECTION_CONFIG_FILE)
         )
-
-        # Set config
+        coll = collection.Collection.load(
+            os.path.join(
+                subdir,
+                self.determine_filename(
+                    consts.COLLECTION_FILE,
+                    cfg
+                )
+            )
+        )
         coll.set_config(cfg)
 
         # Set root
@@ -248,7 +257,13 @@ class Program(object):
             return False
 
         coll.save(
-            os.path.join(subdir, consts.COLLECTION_FILE)
+            os.path.join(
+                subdir,
+                self.determine_filename(
+                    consts.COLLECTION_FILE,
+                    coll.config
+                )
+            )
         )
 
         if verbose:
